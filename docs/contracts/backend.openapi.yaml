@@ -1,0 +1,1011 @@
+"openapi": "3.1.0"
+"info":
+  "title": "Alfa TG Botik Mini App API"
+  "version": "0.1.0"
+  "description": "Контракт API первой версии. Поведение описано в FRONTEND_API.md; общие правила — в README.md. Все схемы находятся в этом файле. Реализация пока не начата."
+"servers":
+  -
+    "url": "/api/v1"
+"security":
+  -
+    "bearerSession": []
+"tags":
+  -
+    "name": "Auth"
+  -
+    "name": "Profile"
+  -
+    "name": "Plans"
+  -
+    "name": "Materials"
+  -
+    "name": "Reminders"
+"paths":
+  "/auth/telegram":
+    "post":
+      "tags":
+        - "Auth"
+      "operationId": "loginWithTelegram"
+      "summary": "Войти по Telegram initData"
+      "description": "Проверка подписи и auth_date выполняется сервером. Сессия действует 8 часов."
+      "security": []
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/TelegramLoginRequest"
+      "responses":
+        "200":
+          "description": "Токен сессии и текущий пользователь"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AuthSession"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/auth/logout":
+    "post":
+      "tags":
+        - "Auth"
+      "operationId": "logout"
+      "summary": "Отозвать текущий токен"
+      "responses":
+        "204":
+          "description": "Сессия завершена"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/me":
+    "get":
+      "tags":
+        - "Profile"
+      "operationId": "getCurrentUser"
+      "summary": "Получить пользователя и профиль"
+      "responses":
+        "200":
+          "description": "Текущий пользователь"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/User"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/me/profile":
+    "patch":
+      "tags":
+        - "Profile"
+      "operationId": "updateBusinessProfile"
+      "summary": "Частично изменить профиль"
+      "description": "expectedVersion берётся из profileVersion. Пропущенное поле не меняется; null очищает nullable-поле."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ProfileUpdate"
+      "responses":
+        "200":
+          "description": "Пользователь с обновлённым profileVersion"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/User"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/plans/current":
+    "get":
+      "tags":
+        - "Plans"
+      "operationId": "getCurrentPlan"
+      "summary": "Получить активный план или null"
+      "responses":
+        "200":
+          "description": "Отсутствие плана не является ошибкой"
+          "content":
+            "application/json":
+              "schema":
+                "anyOf":
+                  -
+                    "$ref": "#/components/schemas/Plan"
+                  -
+                    "type": "null"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/plans/{planId}":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/PlanId"
+    "get":
+      "tags":
+        - "Plans"
+      "operationId": "getPlan"
+      "summary": "Получить собственный план, включая архивный"
+      "responses":
+        "200":
+          "description": "План пользователя"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Plan"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/plans/{planId}/steps/{stepId}":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/PlanId"
+      -
+        "$ref": "#/components/parameters/StepId"
+    "patch":
+      "tags":
+        - "Plans"
+      "operationId": "updatePlanStep"
+      "summary": "Изменить состояние шага"
+      "description": "expectedVersion относится ко всему плану. Изменение архивного плана запрещено."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/PlanStepUpdate"
+      "responses":
+        "200":
+          "description": "Весь обновлённый план"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Plan"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/plans/{planId}/archive":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/PlanId"
+    "post":
+      "tags":
+        - "Plans"
+      "operationId": "archivePlan"
+      "summary": "Архивировать план"
+      "description": "Связанные напоминания автоматически не отменяются."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/VersionCommand"
+      "responses":
+        "200":
+          "description": "Архивированный план"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Plan"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/materials/{materialId}":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/MaterialId"
+    "get":
+      "tags":
+        - "Materials"
+      "operationId": "getMaterial"
+      "summary": "Получить разрешённую карточку материала"
+      "description": "Подробное закрытое содержание не возвращается."
+      "responses":
+        "200":
+          "description": "Карточка материала"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/MaterialCard"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/reminders":
+    "get":
+      "tags":
+        - "Reminders"
+      "operationId": "listReminders"
+      "summary": "Получить собственные напоминания"
+      "description": "Порядок createdAt DESC, id DESC. Без status возвращаются все состояния."
+      "parameters":
+        -
+          "name": "status"
+          "in": "query"
+          "schema":
+            "type": "string"
+            "enum":
+              - "ACTIVE"
+              - "PAUSED"
+              - "COMPLETED"
+              - "CANCELLED"
+        -
+          "name": "offset"
+          "in": "query"
+          "schema":
+            "type": "integer"
+            "minimum": 0
+            "default": 0
+        -
+          "name": "limit"
+          "in": "query"
+          "schema":
+            "type": "integer"
+            "minimum": 1
+            "maximum": 100
+            "default": 20
+      "responses":
+        "200":
+          "description": "Страница напоминаний"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReminderPage"
+        "default":
+          "$ref": "#/components/responses/Problem"
+    "post":
+      "tags":
+        - "Reminders"
+      "operationId": "createReminder"
+      "summary": "Создать напоминание"
+      "description": "Нужен /start в боте. Для ONCE дата должна быть в будущем; зону и принадлежность шага проверяет сервер."
+      "parameters":
+        -
+          "$ref": "#/components/parameters/IdempotencyKey"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReminderCreate"
+      "responses":
+        "201":
+          "description": "Напоминание сохранено"
+          "headers":
+            "Location":
+              "description": "Путь /api/v1/reminders/{id}"
+              "schema":
+                "type": "string"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Reminder"
+        "default":
+          "$ref": "#/components/responses/Problem"
+  "/reminders/{reminderId}":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/ReminderId"
+    "get":
+      "tags":
+        - "Reminders"
+      "operationId": "getReminder"
+      "summary": "Получить собственное напоминание"
+      "responses":
+        "200":
+          "description": "Напоминание пользователя"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Reminder"
+        "default":
+          "$ref": "#/components/responses/Problem"
+    "patch":
+      "tags":
+        - "Reminders"
+      "operationId": "updateReminder"
+      "summary": "Изменить текст, расписание или состояние"
+      "description": "Расписание заменяется целиком. Завершённые и отменённые записи не возобновляются. nextFireAt вычисляет сервер."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReminderUpdate"
+      "responses":
+        "200":
+          "description": "Напоминание с обновлённой версией"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Reminder"
+        "default":
+          "$ref": "#/components/responses/Problem"
+"components":
+  "securitySchemes":
+    "bearerSession":
+      "type": "http"
+      "scheme": "bearer"
+      "bearerFormat": "Opaque"
+      "description": "Непрозрачный токен серверной сессии после проверки Telegram initData"
+  "parameters":
+    "PlanId":
+      "name": "planId"
+      "in": "path"
+      "required": true
+      "schema":
+        "type": "string"
+        "format": "uuid"
+    "StepId":
+      "name": "stepId"
+      "in": "path"
+      "required": true
+      "schema":
+        "type": "string"
+        "format": "uuid"
+    "MaterialId":
+      "name": "materialId"
+      "in": "path"
+      "required": true
+      "schema":
+        "type": "string"
+        "format": "uuid"
+    "ReminderId":
+      "name": "reminderId"
+      "in": "path"
+      "required": true
+      "schema":
+        "type": "string"
+        "format": "uuid"
+    "IdempotencyKey":
+      "name": "Idempotency-Key"
+      "in": "header"
+      "required": true
+      "description": "UUID одной команды создания. Повтор команды использует тот же ключ."
+      "schema":
+        "type": "string"
+        "format": "uuid"
+  "responses":
+    "Problem":
+      "description": "Ошибка по правилам FRONTEND_API.md: 400 MALFORMED_REQUEST; 401 AUTH_REQUIRED/TELEGRAM_AUTH_INVALID; 404 NOT_FOUND; 409 VERSION_CONFLICT/IDEMPOTENCY_CONFLICT/REQUEST_IN_PROGRESS/PLAN_ARCHIVED/REMINDER_TERMINAL; 422 VALIDATION_FAILED/BOT_START_REQUIRED; 429 RATE_LIMITED; 503 SERVICE_UNAVAILABLE."
+      "headers":
+        "X-Request-Id":
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        "Retry-After":
+          "description": "Для ограничения частоты: число секунд до повтора"
+          "schema":
+            "type": "integer"
+            "minimum": 1
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ApiProblem"
+  "schemas":
+    "Uuid":
+      "type": "string"
+      "format": "uuid"
+    "UtcTimestamp":
+      "type": "string"
+      "format": "date-time"
+      "pattern": "Z$"
+    "TimeZone":
+      "type": "string"
+      "minLength": 1
+      "maxLength": 64
+      "pattern": "^[A-Za-z0-9_+./-]+$"
+    "MaterialKind":
+      "type": "string"
+      "enum":
+        - "ARTICLE"
+        - "COURSE"
+        - "LESSON"
+        - "DOCUMENT"
+        - "WEBINAR"
+        - "PODCAST"
+        - "GLOSSARY"
+        - "CALCULATOR"
+    "Profile":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "businessStage"
+        - "industry"
+        - "experience"
+        - "currentTask"
+        - "taxRegime"
+        - "timeZone"
+      "properties":
+        "businessStage":
+          "anyOf":
+            -
+              "type": "string"
+              "enum":
+                - "IDEA"
+                - "LAUNCH"
+                - "OPERATING"
+                - "GROWTH"
+            -
+              "type": "null"
+        "industry":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            -
+              "type": "null"
+        "experience":
+          "anyOf":
+            -
+              "type": "string"
+              "enum":
+                - "BEGINNER"
+                - "EXPERIENCED"
+            -
+              "type": "null"
+        "currentTask":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 500
+            -
+              "type": "null"
+        "taxRegime":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            -
+              "type": "null"
+        "timeZone":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 64
+              "pattern": "^[A-Za-z0-9_+./-]+$"
+            -
+              "type": "null"
+    "ProfileUpdate":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "expectedVersion"
+      "properties":
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
+        "businessStage":
+          "anyOf":
+            -
+              "type": "string"
+              "enum":
+                - "IDEA"
+                - "LAUNCH"
+                - "OPERATING"
+                - "GROWTH"
+            -
+              "type": "null"
+        "industry":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            -
+              "type": "null"
+        "experience":
+          "anyOf":
+            -
+              "type": "string"
+              "enum":
+                - "BEGINNER"
+                - "EXPERIENCED"
+            -
+              "type": "null"
+        "currentTask":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 500
+            -
+              "type": "null"
+        "taxRegime":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            -
+              "type": "null"
+        "timeZone":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 64
+              "pattern": "^[A-Za-z0-9_+./-]+$"
+            -
+              "type": "null"
+      "minProperties": 2
+    "User":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "displayName"
+        - "canReceiveReminders"
+        - "profileVersion"
+        - "profile"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "displayName":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 160
+            -
+              "type": "null"
+        "canReceiveReminders":
+          "type": "boolean"
+        "profileVersion":
+          "type": "integer"
+          "minimum": 0
+        "profile":
+          "$ref": "#/components/schemas/Profile"
+    "MaterialCard":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "title"
+        - "kind"
+        - "description"
+        - "isPaid"
+        - "duration"
+        - "url"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 250
+        "kind":
+          "$ref": "#/components/schemas/MaterialKind"
+        "description":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 1000
+            -
+              "type": "null"
+        "isPaid":
+          "type": "boolean"
+        "duration":
+          "anyOf":
+            -
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            -
+              "type": "null"
+        "url":
+          "type": "string"
+          "format": "uri"
+          "pattern": "^https://"
+          "maxLength": 2000
+    "OnceSchedule":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "type"
+        - "timeZone"
+        - "at"
+      "properties":
+        "type":
+          "const": "ONCE"
+        "timeZone":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 64
+          "pattern": "^[A-Za-z0-9_+./-]+$"
+        "at":
+          "type": "string"
+          "format": "date-time"
+          "pattern": "Z$"
+    "DailySchedule":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "type"
+        - "timeZone"
+        - "localTime"
+        - "startDate"
+      "properties":
+        "type":
+          "const": "DAILY"
+        "timeZone":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 64
+          "pattern": "^[A-Za-z0-9_+./-]+$"
+        "localTime":
+          "type": "string"
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        "startDate":
+          "type": "string"
+          "format": "date"
+    "WeeklySchedule":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "type"
+        - "timeZone"
+        - "localTime"
+        - "startDate"
+        - "dayOfWeek"
+      "properties":
+        "type":
+          "const": "WEEKLY"
+        "timeZone":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 64
+          "pattern": "^[A-Za-z0-9_+./-]+$"
+        "localTime":
+          "type": "string"
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+        "startDate":
+          "type": "string"
+          "format": "date"
+        "dayOfWeek":
+          "type": "string"
+          "enum":
+            - "MONDAY"
+            - "TUESDAY"
+            - "WEDNESDAY"
+            - "THURSDAY"
+            - "FRIDAY"
+            - "SATURDAY"
+            - "SUNDAY"
+    "ReminderSchedule":
+      "oneOf":
+        -
+          "$ref": "#/components/schemas/OnceSchedule"
+        -
+          "$ref": "#/components/schemas/DailySchedule"
+        -
+          "$ref": "#/components/schemas/WeeklySchedule"
+      "discriminator":
+        "propertyName": "type"
+        "mapping":
+          "ONCE": "#/components/schemas/OnceSchedule"
+          "DAILY": "#/components/schemas/DailySchedule"
+          "WEEKLY": "#/components/schemas/WeeklySchedule"
+    "PlanStep":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "position"
+        - "title"
+        - "description"
+        - "status"
+        - "materials"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "position":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 5
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 160
+        "description":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 600
+        "status":
+          "type": "string"
+          "enum":
+            - "TODO"
+            - "DONE"
+        "materials":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MaterialCard"
+          "minItems": 1
+          "maxItems": 2
+    "Plan":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "goal"
+        - "status"
+        - "version"
+        - "steps"
+        - "createdAt"
+        - "updatedAt"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "goal":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 250
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "ARCHIVED"
+        "version":
+          "type": "integer"
+          "minimum": 0
+        "steps":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PlanStep"
+          "minItems": 3
+          "maxItems": 5
+        "createdAt":
+          "$ref": "#/components/schemas/UtcTimestamp"
+        "updatedAt":
+          "$ref": "#/components/schemas/UtcTimestamp"
+    "PlanStepUpdate":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "expectedVersion"
+        - "status"
+      "properties":
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
+        "status":
+          "type": "string"
+          "enum":
+            - "TODO"
+            - "DONE"
+    "VersionCommand":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "expectedVersion"
+      "properties":
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
+    "ReminderCreate":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "title"
+        - "schedule"
+        - "materialId"
+        - "planStepId"
+      "properties":
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 160
+        "schedule":
+          "$ref": "#/components/schemas/ReminderSchedule"
+        "materialId":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/Uuid"
+            -
+              "type": "null"
+        "planStepId":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/Uuid"
+            -
+              "type": "null"
+    "ReminderUpdate":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "expectedVersion"
+      "properties":
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 160
+        "schedule":
+          "$ref": "#/components/schemas/ReminderSchedule"
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "PAUSED"
+            - "CANCELLED"
+      "minProperties": 2
+    "Reminder":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "title"
+        - "status"
+        - "schedule"
+        - "nextFireAt"
+        - "lastSentAt"
+        - "completionReason"
+        - "material"
+        - "planStepId"
+        - "version"
+        - "createdAt"
+        - "updatedAt"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 160
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "PAUSED"
+            - "COMPLETED"
+            - "CANCELLED"
+        "schedule":
+          "$ref": "#/components/schemas/ReminderSchedule"
+        "nextFireAt":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/UtcTimestamp"
+            -
+              "type": "null"
+        "lastSentAt":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/UtcTimestamp"
+            -
+              "type": "null"
+        "completionReason":
+          "anyOf":
+            -
+              "type": "string"
+              "enum":
+                - "DELIVERED"
+                - "EXPIRED"
+                - "DELIVERY_UNKNOWN"
+            -
+              "type": "null"
+        "material":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/MaterialCard"
+            -
+              "type": "null"
+        "planStepId":
+          "anyOf":
+            -
+              "$ref": "#/components/schemas/Uuid"
+            -
+              "type": "null"
+        "version":
+          "type": "integer"
+          "minimum": 0
+        "createdAt":
+          "$ref": "#/components/schemas/UtcTimestamp"
+        "updatedAt":
+          "$ref": "#/components/schemas/UtcTimestamp"
+    "ReminderPage":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "items"
+        - "total"
+        - "offset"
+        - "limit"
+      "properties":
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/Reminder"
+          "minItems": 0
+          "maxItems": 100
+        "total":
+          "type": "integer"
+          "minimum": 0
+        "offset":
+          "type": "integer"
+          "minimum": 0
+        "limit":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 100
+    "FieldError":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "field"
+        - "code"
+        - "message"
+      "properties":
+        "field":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "code":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 80
+        "message":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 500
+    "ApiProblem":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "type"
+        - "title"
+        - "status"
+        - "code"
+        - "requestId"
+        - "instance"
+      "properties":
+        "type":
+          "type": "string"
+          "format": "uri-reference"
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "status":
+          "type": "integer"
+          "minimum": 400
+          "maximum": 599
+        "code":
+          "type": "string"
+          "pattern": "^[A-Z][A-Z0-9_]+$"
+        "requestId":
+          "$ref": "#/components/schemas/Uuid"
+        "instance":
+          "type": "string"
+          "format": "uri-reference"
+        "errors":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/FieldError"
+          "minItems": 0
+          "maxItems": 30
+    "TelegramLoginRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "initData"
+      "properties":
+        "initData":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 16384
+    "AuthSession":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "accessToken"
+        - "tokenType"
+        - "expiresAt"
+        - "user"
+      "properties":
+        "accessToken":
+          "type": "string"
+          "minLength": 32
+          "maxLength": 256
+        "tokenType":
+          "type": "string"
+          "const": "Bearer"
+        "expiresAt":
+          "$ref": "#/components/schemas/UtcTimestamp"
+        "user":
+          "$ref": "#/components/schemas/User"
