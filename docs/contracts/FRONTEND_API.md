@@ -21,6 +21,7 @@
 | GET | `/me` | Нет | 200, User |
 | PATCH | `/me/profile` | `expectedVersion` и изменяемые поля Profile | 200, обновлённый User |
 | GET | `/plans/current` | Нет | 200, Plan либо `null` |
+| POST | `/plans/generate` | Необязательный `goal` | 200, новый активный Plan; нужен Idempotency-Key |
 | GET | `/plans/{planId}` | Нет | 200, собственный Plan |
 | PATCH | `/plans/{planId}/steps/{stepId}` | `expectedVersion`, `status: TODO или DONE` | 200, весь обновлённый Plan |
 | POST | `/plans/{planId}/archive` | `expectedVersion` | 200, архивированный Plan |
@@ -30,7 +31,8 @@
 | POST | `/reminders` | `title`, `schedule`, `materialId`, `planStepId` | 201, Reminder; нужен Idempotency-Key |
 | PATCH | `/reminders/{reminderId}` | `expectedVersion` и изменяемые `title`, `schedule`, `status` | 200, Reminder |
 
-План создаётся кнопкой в боте. Отдельный HTTP-чат и редактор произвольных планов в Mini App не входят в первую версию. Для PATCH напоминания передаётся хотя бы одно изменение, а для профиля — хотя бы одно поле помимо версии.
+План создаётся кнопкой в боте либо запросом `POST /plans/generate` в Mini App (при холодном старте или после обновления профиля). Если в `POST /plans/generate` не передан `goal`, цель берётся из `profile.currentTask`; предыдущий активный план при наличии автоматически переводится в `ARCHIVED`.
+Для PATCH напоминания передаётся хотя бы одно изменение, а для профиля — хотя бы одно поле помимо версии.
 
 Список напоминаний принимает `status` необязательно, `offset` от 0 и `limit` от 1 до 100, по умолчанию 20. Ответ: `items`, `total`, `offset`, `limit`. Без `status` возвращаются все состояния. Порядок: `createdAt DESC, id DESC`.
 
@@ -42,14 +44,14 @@
 |---|---|
 | User | `id: UUID`, `displayName: string или null`, `canReceiveReminders: boolean`, `profileVersion: integer`, `profile: Profile` |
 | Profile | `businessStage`, `industry`, `experience`, `currentTask`, `taxRegime`, `timeZone`; все nullable |
-| MaterialCard | `id: UUID`, `title: string`, `kind: MaterialKind`, `description: string или null`, `isPaid: boolean`, `duration: string или null`, `url: HTTPS` |
+| MaterialCard | `id: UUID`, `title: string`, `kind: MaterialKind`, `description: string или null`, `recommendationReason: string или null`, `isPaid: boolean`, `duration: string или null`, `url: HTTPS` |
 | Plan | `id: UUID`, `goal: string`, `status: ACTIVE или ARCHIVED`, `version: integer`, `steps: PlanStep[]`, `createdAt: UTC`, `updatedAt: UTC` |
 | PlanStep | `id: UUID`, `position: integer от 1`, `title: string`, `description: string`, `status: TODO или DONE`, `materials: MaterialCard[]` |
 | Reminder | `id: UUID`, `title: string`, `status`, `schedule`, `nextFireAt: UTC или null`, `lastSentAt: UTC или null`, `completionReason: string или null`, `material: MaterialCard или null`, `planStepId: UUID или null`, `version: integer`, `createdAt: UTC`, `updatedAt: UTC` |
 
-`businessStage`: `IDEA` — идея, `LAUNCH` — запуск, `OPERATING` — действующий бизнес, `GROWTH` — развитие. `experience`: `BEGINNER` или `EXPERIENCED`. `industry` и `taxRegime` — строки до 100 символов, `currentTask` — до 500. `timeZone` — подтверждённая IANA-зона.
+`businessStage`: `IDEA` — идея, `LAUNCH` — запуск, `OPERATING` — действующий бизнес, `GROWTH` — развитие. `experience`: `BEGINNER` или `EXPERIENCED`. `taxRegime`: `NPD` — НПД (самозанятость), `USN_6` — УСН 6%, `USN_15` — УСН 15%, `PATENT` — патент, `OSNO` — ОСНО, `AUSN` — АУСН. `industry` — строка до 100 символов, `currentTask` — до 500. `timeZone` — подтверждённая IANA-зона.
 
-`MaterialKind`: `ARTICLE`, `COURSE`, `LESSON`, `DOCUMENT`, `WEBINAR`, `PODCAST`, `GLOSSARY`, `CALCULATOR`. `duration` — подпись из каталога, а не гарантированное число минут. `isPaid` задаёт надпись «Платно»/«Бесплатно». Цену фронтенд не вычисляет.
+`MaterialKind`: `ARTICLE`, `COURSE`, `LESSON`, `DOCUMENT`, `WEBINAR`, `PODCAST`, `GLOSSARY`, `CALCULATOR`. `duration` — подпись из каталога, а не гарантированное число минут. `isPaid` задаёт надпись «Платно»/«Бесплатно». Цену фронтенд не вычисляет.`recommendationReason` — краткое персональное объяснение до 300 символов, почему материал подходит пользователю.
 
 Заголовок напоминания — 1–160 символов. Цель плана — до 250, заголовок шага — до 160, описание шага — до 600. План содержит три–пять шагов, шаг — один–два материала. Архивный план доступен только для чтения.
 
@@ -60,8 +62,11 @@
 | `ONCE` | `at: UTC`, `timeZone: IANA` |
 | `DAILY` | `localTime: HH:mm`, `startDate: YYYY-MM-DD`, `timeZone: IANA` |
 | `WEEKLY` | Поля DAILY и `dayOfWeek` |
+| `MONTHLY` | Поля DAILY и `dayOfMonth` |
 
 `dayOfWeek`: `MONDAY`, `TUESDAY`, `WEDNESDAY`, `THURSDAY`, `FRIDAY`, `SATURDAY`, `SUNDAY`. `ONCE.at` находится в будущем. Для повторения `startDate` — нижняя граница; сервер рассчитывает ближайшую будущую отправку. Фронтенд использует серверный `nextFireAt`. Изменение зоны профиля не переносит существующие напоминания.
+
+`dayOfMonth` — целое число от 1 до 31 (если в месяце меньше дней, выбирается последний день).
 
 Состояния: `ACTIVE`, `PAUSED`, `COMPLETED`, `CANCELLED`. Создание даёт `ACTIVE`; PATCH допускает `ACTIVE`, `PAUSED`, `CANCELLED`. Завершённые и отменённые записи не возобновляются. Расписание изменяется целиком. При паузе или завершении `nextFireAt=null`.
 
