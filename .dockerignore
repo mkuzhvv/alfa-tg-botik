@@ -1,0 +1,14 @@
+# Only the backend sources and its Dockerfile belong in the build context.
+**
+!backend/
+!backend/pom.xml
+!backend/mvnw
+!backend/.mvn/
+!backend/.mvn/wrapper/
+!backend/.mvn/wrapper/maven-wrapper.properties
+!backend/src/
+!backend/src/main/
+!backend/src/main/**
+!dockerfiles/
+!dockerfiles/backend/
+!dockerfiles/backend/Dockerfile
