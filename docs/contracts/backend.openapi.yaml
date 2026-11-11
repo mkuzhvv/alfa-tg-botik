@@ -116,7 +116,12 @@
       "tags":
         - "Plans"
       "operationId": "generatePlan"
-      "summary": "Сформировать новый активный план по профилю"
+      "summary": "Создать план или заменить подтверждённый активный план"
+      "description": >-
+        Цель берётся из goal или profile.currentTask. Допустим непустой текст длиной
+        до 250 символов. Для замены передаётся replacePlan
+        с ID и версией подтверждённого плана. Архивирование происходит при успешном
+        сохранении нового плана. Повтор с тем же ключом и телом возвращает сохранённый результат.
       "parameters":
         -
           "$ref": "#/components/parameters/IdempotencyKey"
@@ -133,6 +138,15 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/Plan"
+        "409":
+          "$ref": "#/components/responses/Problem"
+          "description": "PLAN_REPLACEMENT_REQUIRED, VERSION_CONFLICT, IDEMPOTENCY_CONFLICT или REQUEST_IN_PROGRESS"
+        "422":
+          "$ref": "#/components/responses/Problem"
+          "description": "VALIDATION_FAILED для цели или PLAN_MATERIALS_NOT_FOUND при нехватке материалов"
+        "503":
+          "$ref": "#/components/responses/Problem"
+          "description": "SERVICE_UNAVAILABLE при тайм-ауте, недоступности модели или некорректном результате"
         "default":
           "$ref": "#/components/responses/Problem"
   "/plans/{planId}":
@@ -380,7 +394,7 @@
         "format": "uuid"
   "responses":
     "Problem":
-      "description": "Ошибка по правилам FRONTEND_API.md: 400 MALFORMED_REQUEST; 401 AUTH_REQUIRED/TELEGRAM_AUTH_INVALID; 404 NOT_FOUND; 409 VERSION_CONFLICT/IDEMPOTENCY_CONFLICT/REQUEST_IN_PROGRESS/PLAN_ARCHIVED/REMINDER_TERMINAL; 422 VALIDATION_FAILED/BOT_START_REQUIRED; 429 RATE_LIMITED; 503 SERVICE_UNAVAILABLE."
+      "description": "Стандартное тело ошибки. Коды и действия клиента описаны в FRONTEND_API.md."
       "headers":
         "X-Request-Id":
           "schema":
@@ -529,9 +543,7 @@
         "taxRegime":
           "anyOf":
             -
-              "type": "string"
-              "minLength": 1
-              "maxLength": 100
+              "$ref": "#/components/schemas/TaxRegime"
             -
               "type": "null"
         "timeZone":
@@ -599,8 +611,9 @@
               "minLength": 1
               "maxLength": 1000
             -
-              "type": "null"      
+              "type": "null"
         "recommendationReason":
+          "description": "Пояснение из сохранённого плана. Для карточек каталога и напоминаний возвращается null."
           "anyOf":
             -
               "type": "string"
@@ -1052,7 +1065,7 @@
         - "PATENT"
         - "OSNO"
         - "AUSN"
-        
+
     "MonthlySchedule":
       "type": "object"
       "additionalProperties": false
@@ -1080,12 +1093,14 @@
           "type": "integer"
           "minimum": 1
           "maximum": 31
-          
+          "description": "Исходное число месяца. Для короткого месяца дата отправки ограничивается последним днём."
+
     "PlanGenerateRequest":
       "type": "object"
       "additionalProperties": false
       "properties":
         "goal":
+          "description": "При отсутствии или null используется profile.currentTask. К выбранной цели применяется предел 250 символов."
           "anyOf":
             -
               "type": "string"
@@ -1093,3 +1108,18 @@
               "maxLength": 250
             -
               "type": "null"
+        "replacePlan":
+          "$ref": "#/components/schemas/PlanReplacement"
+    "PlanReplacement":
+      "type": "object"
+      "description": "Активный план, замену которого подтвердил пользователь."
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "expectedVersion"
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/Uuid"
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
