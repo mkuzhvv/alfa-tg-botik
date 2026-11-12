@@ -1,4 +1,3 @@
-# Only the backend sources and its Dockerfile belong in the build context.
 **
 !backend/
 !backend/pom.xml

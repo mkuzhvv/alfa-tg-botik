@@ -4,6 +4,10 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/assistant?currentSchema=app,knowledge,public
     username: postgres
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
   flyway:
     default-schema: app
     schemas: app

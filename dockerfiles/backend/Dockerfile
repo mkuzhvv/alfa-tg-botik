@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM eclipse-temurin:21-jdk-jammy@sha256:742daacb9316be4b6fc60258f6e4ac2a11882f6c597373c92290a57bfad0d2e0 AS build
 WORKDIR /workspace
 
