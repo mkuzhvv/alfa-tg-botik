@@ -1,0 +1,2 @@
+# Внешних Python-зависимостей нет: используется стандартная библиотека Python 3.9+.
+# Для команды export нужен Docker Compose и PostgreSQL из compose.yaml проекта.
