@@ -1,75 +1,96 @@
-# React + TypeScript + Vite
+# Альфа-Курс — ИИ-навигатор предпринимателя (Telegram Mini App)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Персональный образовательный и операционный трекер для малого бизнеса и ИП, разработанный в рамках кейса **Альфа-Банка (Track 2)**. 
 
-Currently, two official plugins are available:
+Приложение анализирует профиль предпринимателя (нишу, стадию развития, налоговый режим) и с помощью ИИ формирует пошаговый маршрут запуска или масштабирования бизнеса с подборкой релевантных материалов, инструментов и умным налоговым календарём.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Основные возможности (MVP)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. Персональный ИИ-маршрут (Экран «План»)
+* **Генерация трека под профиль:** динамическое построение пошагового плана на основе выбранной ниши, стадии бизнеса и налогового режима.
+* **Обоснование рекомендаций (Explainable AI):** каждая карточка материала содержит блок *«Почему вам подходит»*, объясняющий ценность урока, гайда или калькулятора конкретно для текущего профиля предпринимателя.
+* **Интерактивный прогресс:** отслеживание выполненных шагов с расчётом процента прохождения, просмотр деталей материалов во всплывающих шторках (Bottom Sheet) и возможность архивации/перегенерации плана.
 
-## Expanding the ESLint configuration
+### 2. Умный календарь и напоминания (Экран «Календарь»)
+* **Гибкое расписание:** поддержка однократных (`ONCE`), ежедневных (`DAILY`), еженедельных (`WEEKLY` с выбором дня недели) и ежемесячных (`MONTHLY` с выбором числа месяца, например, для уведомлений ЕНП до 25-го числа) напоминаний.
+* **Управление статусами:** постановка напоминаний на паузу, возобновление и отмена в один клик.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 3. Адаптивный профиль бизнеса (Экран «Профиль»)
+* **Настройка параметров:** выбор сферы деятельности, стадии бизнеса (`Только идея`, `Запуск`, `Активный рост`, `Масштабирование`) и системы налогообложения (`НПД`, `УСН 6%`, `УСН 15%`, `Патент`, `ОСНО`, `АУСН`).
+* **Реактивная пересборка:** при изменении налогового режима или ниши все описания шагов, налоговые памятки и ИИ-рекомендации мгновенно адаптируются под новые вводные.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### 4. Нативная интеграция с Telegram WebApp
+* Автоматическое разворачивание на весь экран (`WebApp.expand()`) и адаптация цветов под фирменный стиль Альфа-Банка (`#EF3124`).
+* Бесшовная авторизация через обмен подписанной строки `initData` на JWT-токен (`POST /auth/telegram`).
+* Тактильный отклик (`HapticFeedback`) при ключевых действиях пользователя.
+* Автономный **Dev Mode** с Optimistic UI: при отсутствии подключения к бэкенду приложение автоматически работает на локальном реактивном сторе без потери функциональности.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Технологический стек (Frontend)
 
-```
+* **Ядро:** React 19, TypeScript, Vite
+* **Роутинг:** TanStack Router (File-based routing)
+* **Стейт-менеджмент:** Zustand (Optimistic UI + фоновая синхронизация с API)
+* **API и типизация контракта:** `openapi-fetch` + `openapi-typescript` (строгая кодогенерация типов напрямую из `openapi.yaml`)
+* **Стилизация и UI:** Tailwind CSS v4, Vaul (мобильные Bottom Sheet шторки), Lucide React (иконки)
+* **Платформа:** Telegram Mini Apps SDK (`telegram-web-app.js`)
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Структура фронтенда
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+* `frontend/index.html` — точка входа HTML и подключение скрипта `telegram-web-app.js`
+* `frontend/package.json` — зависимости и скрипты сборки
+* `frontend/src/main.tsx` — инициализация React-приложения и роутера
+* `frontend/src/index.css` — токены дизайн-системы Альфа-Банка (Tailwind v4)
+* `frontend/src/routes/__root.tsx` — корневой лейаут, шапка, навигация и инициализация TG WebApp
+* `frontend/src/routes/index.tsx` — экран «План» (шаги, прогресс, шторка материала, лоадер ИИ)
+* `frontend/src/routes/reminders.tsx` — экран «Календарь» (список и создание напоминаний)
+* `frontend/src/routes/profile.tsx` — экран «Профиль» (ниша, стадия, налоговый режим)
+* `frontend/src/shared/api/schema.d.ts` — автосгенерированные типы из OpenAPI-контракта
+* `frontend/src/shared/api/client.ts` — настроенный `openapi-fetch` клиент + Auth Middleware
+* `frontend/src/shared/api/devStore.ts` — Zustand-стор с Optimistic UI и генератором трека
+* `frontend/src/shared/lib/telegram.ts` — мост для работы с Telegram WebApp API и HapticFeedback
 
-```
+---
+
+## Быстрый старт и запуск
+
+### 1. Установка зависимостей
+Перейдите в директорию фронтенда и установите пакеты:
+
+    cd frontend
+    npm install
+
+### 2. Настройка переменных окружения (опционально)
+По умолчанию фронтенд отправляет запросы на `http://localhost:8080/api/v1`. Чтобы задать другой адрес бэкенда, создайте файл `.env` в папке `frontend`:
+
+    VITE_API_BASE_URL=http://localhost:8080/api/v1
+
+### 3. Запуск в режиме разработки
+
+    npm run dev
+
+Приложение откроется по адресу `http://localhost:5173`. В правом верхнем углу шапки отобразится индикатор **Dev Mode** (при открытии внутри Telegram он автоматически переключится на **TG Mini App**).
+
+### 4. Сборка для продакшена
+Проверка типов TypeScript и сборка оптимизированного бандла в папку `dist/`:
+
+    npm run build
+
+### 5. Обновление типов из OpenAPI-контракта
+Если файл спецификации `openapi.yaml` изменился, перегенерировать строгие TypeScript-типы можно командой:
+
+    npm run gen:api
+
+---
+
+## Стыковка с Backend API
+
+Фронтенд полностью типизирован по контракту `openapi.yaml` и использует следующие механизмы при работе с сервером:
+1. **Авторизация:** при запуске в Telegram отправляется `POST /auth/telegram` с `initData`. Полученный `accessToken` автоматически прикрепляется ко всем запросам в заголовке `Authorization: Bearer <token>`.
+2. **Локальная отладка без Telegram:** если приложение открыто в обычном браузере в dev-режиме, клиент автоматически добавляет заголовок `X-Dev-User-Id: 11111111-1111-1111-1111-111111111111`.
+3. **Контроль версий (Optimistic Locking):** при обновлении профиля (`PUT /me/profile`), статуса шагов (`PATCH /plans/{planId}/steps/{stepId}`) и напоминаний автоматически передаётся актуальный `expectedVersion`.
