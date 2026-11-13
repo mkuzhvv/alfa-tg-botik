@@ -16,7 +16,8 @@ import {
 import { useDevStore } from '@/shared/api/devStore'
 import type { MaterialCard, MaterialKind } from '@/shared/api/client'
 import { cn } from '@/shared/lib/utils'
-
+import { haptic } from '@/shared/lib/telegram'
+import { Loader2 } from 'lucide-react'
 export const Route = createFileRoute('/')({
   component: PlanScreen,
 })
@@ -37,39 +38,76 @@ function PlanScreen() {
   const { plan, user, toggleStepStatus, archiveCurrentPlan, generatePlan, createReminder } =
     useDevStore()
 
-  // Выбранный материал для открытия в нижней шторке (Vaul)
   const [selectedMaterial, setSelectedMaterial] = useState<{
     material: MaterialCard
     stepId: string
   } | null>(null)
   const [reminderAdded, setReminderAdded] = useState(false)
 
-  // Если активного плана нет (например, новый юзер или план отправлен в архив)
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  const handleGeneratePlan = () => {
+    haptic.light()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setIsGenerating(true)
+    setTimeout(() => {
+      generatePlan()
+      setIsGenerating(false)
+      haptic.success()
+    }, 1500)
+  }
+
+  if (isGenerating) {
+    const taxLabels: Record<string, string> = {
+      NPD: 'НПД',
+      USN_6: 'УСН 6%',
+      USN_15: 'УСН 15%',
+      PATENT: 'Патент',
+      OSNO: 'ОСНО',
+      AUSN: 'АУСН',
+    }
+
+    const readableTax = user.profile.taxRegime
+      ? taxLabels[user.profile.taxRegime]
+      : null
+
+    return (
+      <div className="bg-white rounded-3xl p-8 text-center border border-gray-100 shadow-xs space-y-4 my-4 animate-in fade-in duration-300">
+        <div className="w-14 h-14 rounded-2xl bg-red-50 text-alfa-red flex items-center justify-center mx-auto">
+          <Loader2 className="w-7 h-7 animate-spin" />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-base font-bold text-alfa-dark">
+            ИИ-навигатор формирует трек...
+          </h2>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Анализируем нишу «{user.profile.industry || 'Новый бизнес'}» и подбираем материалы
+            {readableTax ? ` под режим ${readableTax}` : ' под ваш профиль'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if (!plan) {
     return (
-      <div className="bg-white rounded-3xl p-6 text-center shadow-xs border border-gray-100 mt-4 space-y-4">
+      <div className="bg-white rounded-3xl p-6 text-center border border-gray-100 shadow-xs space-y-4 my-4 animate-in fade-in duration-300">
         <div className="w-12 h-12 rounded-2xl bg-red-50 text-alfa-red flex items-center justify-center mx-auto">
           <Sparkles className="w-6 h-6" />
         </div>
-        <div className="space-y-1.5">
-          <h2 className="text-lg font-bold">У вас пока нет активного плана</h2>
+        <div className="space-y-1">
+          <h2 className="text-base font-bold text-alfa-dark">
+            У вас пока нет активного плана
+          </h2>
           <p className="text-xs text-gray-500 leading-relaxed">
-            Мы соберём персональный трек из 3–5 шагов под вашу нишу (
-            <span className="font-medium text-alfa-dark">
-              {user.profile.industry || 'не указана'}
-            </span>
-            ) и налоговый режим (
-            <span className="font-medium text-alfa-dark">
-              {user.profile.taxRegime || 'не выбран'}
-            </span>
-            ).
+            Сформируйте персональный пошаговый план развития бизнеса на основе вашего профиля и налогового режима.
           </p>
         </div>
         <button
-          onClick={() => generatePlan()}
+          onClick={handleGeneratePlan}
           className="w-full py-3 px-4 rounded-xl bg-alfa-red hover:bg-alfa-red-hover text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
         >
-          <RefreshCw className="w-4 h-4" />
+          <Sparkles className="w-4 h-4" />
           <span>Сформировать план по профилю</span>
         </button>
       </div>
@@ -101,7 +139,6 @@ function PlanScreen() {
 
   return (
     <div className="space-y-4">
-      {/* Карточка цели и прогресса */}
       <div className="bg-alfa-dark text-white rounded-3xl p-5 shadow-sm space-y-4">
         <div className="flex items-start justify-between gap-2">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-alfa-red text-white">
@@ -116,7 +153,6 @@ function PlanScreen() {
           <h2 className="text-base font-bold leading-snug">{plan.goal}</h2>
         </div>
 
-        {/* Прогресс-бар */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs">
             <span className="text-gray-300">
@@ -133,7 +169,6 @@ function PlanScreen() {
         </div>
       </div>
 
-      {/* Список шагов плана */}
       <div className="space-y-3">
         {plan.steps.map((step) => {
           const isDone = step.status === 'DONE'
@@ -145,7 +180,6 @@ function PlanScreen() {
                 isDone ? 'border-gray-200 bg-gray-50/70' : 'border-gray-100 shadow-xs',
               )}
             >
-              {/* Заголовок шага + чекбокс */}
               <div className="flex items-start gap-3">
                 <button
                   onClick={() => toggleStepStatus(step.id)}
@@ -182,7 +216,6 @@ function PlanScreen() {
                 </div>
               </div>
 
-              {/* Материалы внутри шага */}
               <div className="mt-3 pt-3 border-t border-gray-100 space-y-2.5">
                 {step.materials.map((material) => (
                   <button
@@ -220,7 +253,6 @@ function PlanScreen() {
                       {material.title}
                     </div>
 
-                    {/* Наша правка №2: объяснение рекомендации (recommendationReason) */}
                     {material.recommendationReason && (
                       <div className="text-[11px] text-gray-600 bg-white/90 rounded-lg p-2 border-l-2 border-alfa-red leading-relaxed">
                         <span className="font-semibold text-alfa-dark">Почему вам подходит: </span>
@@ -235,13 +267,12 @@ function PlanScreen() {
         })}
       </div>
 
-      {/* Кнопки управления планом (Пересобрать / Архивировать) */}
       <div className="flex gap-2 pt-2">
         <button
-          onClick={() => generatePlan()}
-          className="flex-1 py-2.5 px-3 rounded-xl bg-white border border-gray-200 text-xs font-semibold text-alfa-dark hover:bg-gray-50 flex items-center justify-center gap-1.5 cursor-pointer"
+          onClick={handleGeneratePlan}
+          className="flex-1 py-3 px-4 rounded-2xl bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold text-alfa-dark flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
         >
-          <RefreshCw className="w-3.5 h-3.5 text-alfa-red" />
+          <RefreshCw className="w-4 h-4 text-alfa-red" />
           <span>Обновить по профилю</span>
         </button>
         <button
@@ -253,7 +284,6 @@ function PlanScreen() {
         </button>
       </div>
 
-      {/* Мобильная шторка (Vaul Bottom Sheet) с деталями материала */}
       <Drawer.Root
         open={Boolean(selectedMaterial)}
         onOpenChange={(open) => !open && setSelectedMaterial(null)}
@@ -295,7 +325,6 @@ function PlanScreen() {
                   {selectedMaterial.material.description}
                 </Drawer.Description>
 
-                {/* Персональное обоснование выбора */}
                 {selectedMaterial.material.recommendationReason && (
                   <div className="rounded-2xl bg-red-50/70 border border-red-100 p-3.5 space-y-1">
                     <div className="text-xs font-bold text-alfa-red flex items-center gap-1.5">
@@ -308,7 +337,6 @@ function PlanScreen() {
                   </div>
                 )}
 
-                {/* Защита платного контента по Ограничению 06 ТЗ */}
                 {selectedMaterial.material.isPaid && (
                   <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3.5 text-xs text-amber-900 leading-relaxed">
                     <strong>Доступ по подписке или покупке:</strong> Полные видеолекции и

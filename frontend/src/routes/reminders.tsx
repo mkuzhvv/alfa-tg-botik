@@ -73,7 +73,6 @@ function RemindersScreen() {
   const [dayOfMonth, setDayOfMonth] = useState(25)
   const [dayOfWeek, setDayOfWeek] = useState<DayOfWeek>('THURSDAY')
 
-  // Показываем только активные и поставленные на паузу напоминания
   const visibleReminders = reminders.filter((r) => r.status !== 'CANCELLED')
 
   const handleQuickTaxReminder = () => {
@@ -144,7 +143,6 @@ function RemindersScreen() {
 
   return (
     <div className="space-y-4">
-      {/* Верхний баннер: быстрое налоговое напоминание по режиму из профиля */}
       <div className="bg-alfa-dark text-white rounded-3xl p-5 shadow-sm space-y-3">
         <div className="flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-alfa-red text-white">
@@ -182,7 +180,6 @@ function RemindersScreen() {
         </div>
       </div>
 
-      {/* Список напоминаний */}
       {visibleReminders.length === 0 ? (
         <div className="bg-white rounded-3xl p-6 text-center border border-gray-100 space-y-3">
           <div className="w-12 h-12 rounded-2xl bg-red-50 text-alfa-red flex items-center justify-center mx-auto">
@@ -224,7 +221,6 @@ function RemindersScreen() {
                     </span>
                   </div>
 
-                  {/* Кнопки паузы и удаления */}
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => toggleReminderStatus(reminder.id)}
@@ -262,7 +258,6 @@ function RemindersScreen() {
                   </div>
                 </div>
 
-                {/* Если к напоминанию привязан учебный материал */}
                 {reminder.material && (
                   <a
                     href={reminder.material.url}
@@ -280,7 +275,6 @@ function RemindersScreen() {
         </div>
       )}
 
-      {/* Нижняя шторка создания напоминания */}
       <Drawer.Root open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
@@ -292,7 +286,6 @@ function RemindersScreen() {
                 Новое напоминание
               </Drawer.Title>
 
-              {/* Быстрые шаблоны */}
               <div className="space-y-1.5">
                 <span className="text-xs font-semibold text-gray-500">Быстрый шаблон:</span>
                 <div className="flex flex-wrap gap-1.5">
@@ -313,7 +306,6 @@ function RemindersScreen() {
                 </div>
               </div>
 
-              {/* Название */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-alfa-dark block">
                   О чём напомнить?
@@ -327,7 +319,6 @@ function RemindersScreen() {
                 />
               </div>
 
-              {/* Периодичность */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-alfa-dark block">
                   Периодичность
@@ -351,7 +342,6 @@ function RemindersScreen() {
                 </div>
               </div>
 
-              {/* Выбор числа месяца для MONTHLY */}
               {scheduleType === 'MONTHLY' && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-alfa-dark block">
@@ -377,7 +367,6 @@ function RemindersScreen() {
                 </div>
               )}
 
-              {/* Выбор дня недели для WEEKLY */}
               {scheduleType === 'WEEKLY' && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-alfa-dark block">
@@ -403,7 +392,6 @@ function RemindersScreen() {
                 </div>
               )}
 
-              {/* Время уведомления */}
               {scheduleType !== 'ONCE' && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-alfa-dark block">

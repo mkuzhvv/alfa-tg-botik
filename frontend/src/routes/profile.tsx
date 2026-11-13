@@ -4,12 +4,12 @@ import { UserCircle, Briefcase, Calculator, CheckCircle2, Save } from 'lucide-re
 import { useDevStore } from '@/shared/api/devStore'
 import type { TaxRegime } from '@/shared/api/client'
 import { cn } from '@/shared/lib/utils'
+import { haptic } from '@/shared/lib/telegram'
 
 export const Route = createFileRoute('/profile')({
   component: ProfileScreen,
 })
 
-// Тот самый строгий список из твоего обновлённого API контракта
 const TAX_REGIMES: { value: TaxRegime; label: string; desc: string }[] = [
   { value: 'NPD', label: 'НПД (Самозанятость)', desc: 'Налог 4-6% без отчётов' },
   { value: 'USN_6', label: 'УСН 6%', desc: 'С доходов' },
@@ -29,7 +29,6 @@ const BUSINESS_STAGES = [
 function ProfileScreen() {
   const { user, updateProfile } = useDevStore()
   
-  // Локальное состояние для формы, берем начальные данные из стора
   const [industry, setIndustry] = useState(user.profile.industry || '')
   const [taxRegime, setTaxRegime] = useState<TaxRegime | undefined>(user.profile.taxRegime ?? undefined)
   const [stage, setStage] = useState(user.profile.businessStage)
@@ -37,13 +36,13 @@ function ProfileScreen() {
   const [isSaved, setIsSaved] = useState(false)
 
   const handleSave = () => {
+    haptic.success()
     updateProfile({
       industry,
       taxRegime,
       businessStage: stage,
     })
     
-    // Показываем красивую анимацию сохранения
     setIsSaved(true)
     setTimeout(() => setIsSaved(false), 2000)
   }
@@ -51,7 +50,6 @@ function ProfileScreen() {
   return (
     <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
-      {/* Шапка профиля */}
       <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 flex items-center gap-4">
         <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
           <UserCircle className="w-8 h-8 text-gray-400" />
@@ -62,10 +60,8 @@ function ProfileScreen() {
         </div>
       </div>
 
-      {/* Форма настроек бизнеса */}
       <div className="bg-white rounded-3xl p-5 shadow-xs border border-gray-100 space-y-6">
         
-        {/* Ниша */}
         <div className="space-y-2.5">
           <label className="flex items-center gap-2 text-sm font-bold text-alfa-dark">
             <Briefcase className="w-4 h-4 text-alfa-red" />
@@ -80,7 +76,6 @@ function ProfileScreen() {
           />
         </div>
 
-        {/* Стадия бизнеса */}
         <div className="space-y-2.5">
           <label className="text-sm font-bold text-alfa-dark block">Стадия развития</label>
           <div className="flex flex-wrap gap-2">
@@ -101,7 +96,6 @@ function ProfileScreen() {
           </div>
         </div>
 
-        {/* Налоговый режим (твоя правка!) */}
         <div className="space-y-2.5">
           <label className="flex items-center gap-2 text-sm font-bold text-alfa-dark">
             <Calculator className="w-4 h-4 text-alfa-red" />
@@ -134,7 +128,6 @@ function ProfileScreen() {
           </div>
         </div>
 
-        {/* Кнопка сохранения */}
         <div className="pt-2">
           <button
             onClick={handleSave}
