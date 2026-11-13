@@ -6,7 +6,6 @@ export const apiClient = createClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1',
 })
 
-// Перехватчик: автоматически добавляет токен авторизации в каждый запрос к бэкенду
 apiClient.use({
   async onRequest({ request }) {
     const token = useAuthStore.getState().accessToken
@@ -14,7 +13,6 @@ apiClient.use({
     if (token) {
       request.headers.set('Authorization', `Bearer ${token}`)
     } else if (import.meta.env.DEV) {
-      // Фолбэк для локальной отладки с Java-бэкендом без Telegram
       request.headers.set('X-Dev-User-Id', '11111111-1111-1111-1111-111111111111')
     }
 
@@ -22,7 +20,6 @@ apiClient.use({
   },
 })
 
-// Экспортируем ключевые типы из контракта для удобства
 export type User = components['schemas']['User']
 export type Profile = components['schemas']['Profile']
 export type ProfileUpdate = components['schemas']['ProfileUpdate']

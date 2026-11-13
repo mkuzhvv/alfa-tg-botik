@@ -48,7 +48,6 @@ function RootLayout() {
 
   return (
     <div className="min-h-screen bg-alfa-gray text-alfa-dark flex flex-col max-w-md mx-auto shadow-sm">
-      {/* Верхняя шапка в стиле Альфа-Банка */}
       <header className="bg-white px-4 py-3 border-b border-gray-200 sticky top-0 z-20 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-alfa-red flex items-center justify-center text-white font-bold text-lg">
@@ -60,18 +59,15 @@ function RootLayout() {
           </div>
         </div>
 
-        {/* Индикатор режима работы (Telegram или Dev-браузер) */}
         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
           {inTelegram ? 'TG Mini App' : 'Dev Mode'}
         </span>
       </header>
 
-      {/* Контент активного экрана */}
       <main className="flex-1 p-4 pb-24">
         <Outlet />
       </main>
 
-      {/* Нижняя панель навигации */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 px-6 py-2 flex justify-around items-center z-20">
         <Link
           to="/"
