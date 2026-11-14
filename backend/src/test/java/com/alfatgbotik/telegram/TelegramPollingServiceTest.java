@@ -1,5 +1,6 @@
 package com.alfatgbotik.telegram;
 
+import com.alfatgbotik.telegram.service.TelegramUpdateProcessor;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -26,8 +27,13 @@ import static org.mockito.Mockito.when;
 class TelegramPollingServiceTest {
 
     private final TelegramClient client = mock(TelegramClient.class);
-    private final TelegramUpdateHandler handler = mock(TelegramUpdateHandler.class);
-    private final TelegramPollingService polling = new TelegramPollingService(client, handler);
+    private final TelegramUpdateProcessor processor = mock(TelegramUpdateProcessor.class);
+    private final TelegramConnectionCheck connection = mock(TelegramConnectionCheck.class);
+    private final TelegramPollingService polling = new TelegramPollingService(client, processor, connection);
+
+    TelegramPollingServiceTest() {
+        when(connection.getBotId()).thenReturn(123L);
+    }
 
     @Test
     void processesUpdatesInOrderAndAdvancesOffsetAfterSuccess() throws TelegramApiException {
@@ -40,12 +46,15 @@ class TelegramPollingServiceTest {
         polling.pollOnce();
         polling.pollOnce();
 
-        var order = inOrder(handler);
-        order.verify(handler).handle(first);
-        order.verify(handler).handle(second);
+        var order = inOrder(processor);
+        order.verify(processor).retryPending(123);
+        order.verify(processor).process(123, first);
+        order.verify(processor).process(123, second);
         ArgumentCaptor<GetUpdates> requests = ArgumentCaptor.forClass(GetUpdates.class);
         verify(client, times(2)).execute(requests.capture());
         assertThat(requests.getAllValues()).extracting(GetUpdates::getOffset).containsExactly(0, 12);
+        assertThat(requests.getAllValues().getFirst().getAllowedUpdates())
+                .containsExactly("message", "callback_query");
     }
 
     @Test
@@ -53,7 +62,7 @@ class TelegramPollingServiceTest {
         Update update = update(10);
         when(client.execute(any(GetUpdates.class))).thenReturn(new ArrayList<>(List.of(update)));
         doThrow(new DataAccessResourceFailureException("database unavailable"))
-                .doNothing().when(handler).handle(update);
+                .doNothing().when(processor).process(123, update);
 
         assertThatThrownBy(polling::pollOnce).isInstanceOf(DataAccessResourceFailureException.class);
         polling.pollOnce();
@@ -64,18 +73,19 @@ class TelegramPollingServiceTest {
     }
 
     @Test
-    void retriesOnlyUnfinishedPartOfBatchAfterSendFailure() throws TelegramApiException {
+    void retriesOnlyUnfinishedPartOfBatchAfterProcessingFailure() throws TelegramApiException {
         Update first = update(10);
         Update second = update(11);
         when(client.execute(any(GetUpdates.class)))
                 .thenReturn(new ArrayList<>(List.of(first, second)))
                 .thenReturn(new ArrayList<>(List.of(second)));
-        doThrow(new TelegramApiException("send failed")).doNothing().when(handler).handle(second);
+        doThrow(new DataAccessResourceFailureException("record failed"))
+                .doNothing().when(processor).process(123, second);
 
-        assertThatThrownBy(polling::pollOnce).isInstanceOf(TelegramApiException.class);
+        assertThatThrownBy(polling::pollOnce).isInstanceOf(DataAccessResourceFailureException.class);
         polling.pollOnce();
 
-        verify(handler).handle(first);
+        verify(processor).process(123, first);
         ArgumentCaptor<GetUpdates> requests = ArgumentCaptor.forClass(GetUpdates.class);
         verify(client, times(2)).execute(requests.capture());
         assertThat(requests.getAllValues()).extracting(GetUpdates::getOffset).containsExactly(0, 11);
@@ -101,6 +111,7 @@ class TelegramPollingServiceTest {
             polling.close();
         }
         assertThat(exited.await(2, TimeUnit.SECONDS)).isTrue();
+        verify(processor).recoverAfterRestart(123);
     }
 
     private Update update(int id) {

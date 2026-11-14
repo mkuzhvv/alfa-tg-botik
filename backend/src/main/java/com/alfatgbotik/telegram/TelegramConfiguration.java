@@ -1,16 +1,20 @@
 package com.alfatgbotik.telegram;
 
 import com.alfatgbotik.identity.service.UserService;
+import com.alfatgbotik.telegram.persistence.TelegramUpdateRepository;
+import com.alfatgbotik.telegram.service.TelegramUpdateProcessor;
 import jakarta.annotation.PreDestroy;
 import okhttp3.OkHttpClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.time.Duration;
+import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(TelegramProperties.class)
@@ -34,14 +38,33 @@ public class TelegramConfiguration {
     }
 
     @Bean
-    public TelegramUpdateHandler telegramUpdateHandler(UserService users, TelegramClient telegramClient) {
-        return new TelegramUpdateHandler(users, telegramClient);
+    public TelegramCommandRegistration telegramCommandRegistration(TelegramClient telegramClient) {
+        return new TelegramCommandRegistration(telegramClient);
+    }
+
+    @Bean
+    public TelegramUpdateHandler telegramUpdateHandler(UserService users) {
+        return new TelegramUpdateHandler(users);
+    }
+
+    @Bean
+    public TelegramReplySender telegramReplySender(TelegramClient telegramClient) {
+        return new TelegramReplySender(telegramClient);
+    }
+
+    @Bean
+    public TelegramUpdateProcessor telegramUpdateProcessor(TelegramUpdateRepository updates,
+                                                          TelegramUpdateHandler handler,
+                                                          TelegramReplySender sender,
+                                                          PlatformTransactionManager transactionManager) {
+        return new TelegramUpdateProcessor(updates, handler, sender, transactionManager, Clock.systemUTC());
     }
 
     @Bean(destroyMethod = "close")
     public TelegramPollingService telegramPollingService(TelegramClient telegramClient,
-                                                        TelegramUpdateHandler updateHandler) {
-        return new TelegramPollingService(telegramClient, updateHandler);
+                                                        TelegramUpdateProcessor processor,
+                                                        TelegramConnectionCheck connectionCheck) {
+        return new TelegramPollingService(telegramClient, processor, connectionCheck);
     }
 
     @PreDestroy

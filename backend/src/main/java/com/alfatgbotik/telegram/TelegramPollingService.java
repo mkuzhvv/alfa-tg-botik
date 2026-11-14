@@ -1,5 +1,6 @@
 package com.alfatgbotik.telegram;
 
+import com.alfatgbotik.telegram.service.TelegramUpdateProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -15,41 +16,47 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import java.util.Comparator;
 import java.util.List;
 
-@Order(1)
+@Order(2)
 public class TelegramPollingService implements ApplicationRunner, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramPollingService.class);
 
     private final TelegramClient telegramClient;
-    private final TelegramUpdateHandler updateHandler;
+    private final TelegramUpdateProcessor processor;
+    private final TelegramConnectionCheck connectionCheck;
     private volatile boolean running;
     private Thread pollingThread;
     private int nextOffset;
 
-    public TelegramPollingService(TelegramClient telegramClient, TelegramUpdateHandler updateHandler) {
+    public TelegramPollingService(TelegramClient telegramClient, TelegramUpdateProcessor processor,
+                                  TelegramConnectionCheck connectionCheck) {
         this.telegramClient = telegramClient;
-        this.updateHandler = updateHandler;
+        this.processor = processor;
+        this.connectionCheck = connectionCheck;
     }
 
     @Override
     public void run(ApplicationArguments arguments) {
+        processor.recoverAfterRestart(connectionCheck.getBotId());
         running = true;
         pollingThread = Thread.ofPlatform().name("telegram-polling").daemon(true).start(this::poll);
         log.info("Telegram polling started");
     }
 
     void pollOnce() throws TelegramApiException {
+        long botId = connectionCheck.getBotId();
+        processor.retryPending(botId);
         List<Update> updates = telegramClient.execute(GetUpdates.builder()
                 .offset(nextOffset)
                 .limit(100)
                 .timeout(5)
-                .allowedUpdates(List.of("message"))
+                .allowedUpdates(List.of("message", "callback_query"))
                 .build());
         for (Update update : updates.stream().sorted(Comparator.comparingInt(Update::getUpdateId)).toList()) {
             if (update.getUpdateId() < nextOffset) {
                 continue;
             }
-            updateHandler.handle(update);
+            processor.process(botId, update);
             nextOffset = update.getUpdateId() + 1;
         }
     }

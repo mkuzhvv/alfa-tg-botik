@@ -16,6 +16,7 @@ public class TelegramConnectionCheck implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(TelegramConnectionCheck.class);
 
     private final TelegramClient telegramClient;
+    private long botId;
 
     public TelegramConnectionCheck(TelegramClient telegramClient) {
         this.telegramClient = telegramClient;
@@ -30,9 +31,17 @@ public class TelegramConnectionCheck implements ApplicationRunner {
             throw new IllegalStateException(
                     "Telegram getMe failed. Check TELEGRAM_BOT_TOKEN and network access to api.telegram.org.");
         }
-        if (bot == null || !Boolean.TRUE.equals(bot.getIsBot())) {
+        if (bot == null || !Boolean.TRUE.equals(bot.getIsBot()) || bot.getId() == null || bot.getId() <= 0) {
             throw new IllegalStateException("Telegram getMe did not return a bot account");
         }
+        botId = bot.getId();
         log.info("Telegram connected: @{} (id={})", bot.getUserName(), bot.getId());
+    }
+
+    public long getBotId() {
+        if (botId == 0) {
+            throw new IllegalStateException("Telegram bot identity has not been verified");
+        }
+        return botId;
     }
 }
