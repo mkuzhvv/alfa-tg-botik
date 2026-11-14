@@ -312,6 +312,111 @@ docker compose exec -T postgres psql -U postgres -d assistant -c "SELECT (SELECT
 Точечные тесты выше используют локальную PostgreSQL и подменяют Telegram API;
 они не запускают второго получателя настоящих сообщений.
 
+## Авторизация Mini App и API профиля: этап 4
+
+Все пользовательские HTTP-методы имеют префикс `/api/v1`. Реализованы:
+
+| Метод | Адрес | Результат |
+|---|---|---|
+| POST | `/api/v1/auth/telegram` | Вход по `initData`, ключ сессии и пользователь |
+| POST | `/api/v1/auth/logout` | Отзыв текущей сессии, ответ `204` |
+| GET | `/api/v1/me` | Текущий пользователь с профилем и его версией |
+| PATCH | `/api/v1/me/profile` | Изменение профиля, обновлённый пользователь |
+
+Mini App передаёт исходную строку `Telegram.WebApp.initData` в JSON-поле `initData`.
+`TelegramInitDataValidator` проверяет HMAC-SHA256 по алгоритму Telegram, затем
+`auth_date` и сведения о пользователе. Допускаются данные возрастом до 10 минут
+и опережение времени до 30 секунд. Все подписанные параметры, включая `signature`
+при её наличии, участвуют в HMAC-проверке; исключается только поле `hash`.
+Повторные ключи query string, неверная подпись и неподходящие данные дают
+`401 TELEGRAM_AUTH_INVALID`.
+
+Для проверки подписи используется `TELEGRAM_BOT_TOKEN`. Он нужен и при
+`TELEGRAM_BOT_ENABLED=false`: этот переключатель управляет подключением polling,
+а не входом в Mini App. Если токен не настроен, вход возвращает
+`503 SERVICE_UNAVAILABLE`. Приложение с отключённым Telegram может запускаться без токена.
+
+После проверки `TelegramAuthService` вызывает существующий `UserService.getOrCreate`
+и выдаёт случайный 256-битный Bearer-ключ через `SessionService`. Ответ содержит
+`accessToken`, `tokenType=Bearer`, `expiresAt` и `user`. В памяти Java хранится
+соответствие SHA-256 ключа, UUID пользователя и срока действия. Сессия действует
+8 часов; разные входы создают независимые сессии. Выход отзывает только текущую.
+После перезапуска Java требуется повторный вход. Таблица сессий и новая миграция не нужны.
+
+Вход через Mini App не подтверждает личный чат для напоминаний. Подтверждение
+`chatId` выполняет `/start`; новый пользователь Mini App получает
+`canReceiveReminders=false` до подтверждения через бота.
+
+Каждый защищённый запрос передаёт `Authorization: Bearer <accessToken>`.
+`SessionAuthenticationFilter` перед контроллером передаёт ключ менеджеру
+аутентификации Spring Security. Менеджер проверяет сессию и возвращает
+`AuthenticatedSession`. Контроллер получает UUID из этой проверенной сессии.
+Переданный клиентом `userId` не используется для выбора пользователя.
+Отсутствующая, отозванная, неизвестная или истёкшая сессия даёт `401 AUTH_REQUIRED`.
+
+HTTP Basic, форма входа и cookie-сессии отключены. CSRF-проверка отключена для
+API с Bearer-ключом: браузер не прикладывает этот ключ автоматически, его явно
+передаёт фронтенд в заголовке. Ключ остаётся в памяти фронтенда; ответы API
+получают заголовок `Cache-Control: no-store`. `GET /actuator/health` открыт для
+проверки Docker. Вызовы API фронтендом предполагаются через общий origin и nginx
+из архитектуры; подключение реального интерфейса относится к этапу 10.
+
+Пример тела изменения профиля:
+
+```json
+{
+  "expectedVersion": 0,
+  "industry": "Торговля",
+  "currentTask": "Увеличить продажи",
+  "timeZone": "Europe/Moscow"
+}
+```
+
+`expectedVersion` берётся из последнего `profileVersion`. Пропущенное поле
+сохраняет прежнее значение; явный `null` очищает его. Нужна хотя бы одна правка.
+`ProfileUpdateRequest` преобразует JSON в существующий `ProfileUpdateCommand`.
+После успешного завершения профильного сервиса контроллер получает полный
+`UserDto` через `UserService`, включая актуальную версию после commit.
+
+Ошибки имеют формат `application/problem+json`: `type`, `title`, `status`, `code`,
+`requestId`, `instance`; при ошибках полей добавляется `errors`.
+Заголовок `X-Request-Id` совпадает с `requestId` тела и идентификатором в журнале.
+В журнал HTTP попадают идентификатор, метод и статус; тела, ключи сессий и
+`initData` не записываются.
+
+Неизвестные поля, неверные JSON-типы, повторные JSON-ключи и лишний JSON после
+тела дают `400 MALFORMED_REQUEST`. Неверные значения полей дают
+`422 VALIDATION_FAILED`, устаревшая версия — `409 VERSION_CONFLICT`.
+Неподдержанный HTTP-метод даёт `405 MALFORMED_REQUEST`, тип содержимого —
+`415 MALFORMED_REQUEST`. Ошибки БД и непредвиденные сбои получают
+`503 SERVICE_UNAVAILABLE` без технических подробностей в ответе.
+
+Короткий набор проверок этапа 4 и затронутых сервисов из папки `backend`:
+
+```powershell
+.\mvnw.cmd --batch-mode --no-transfer-progress "-Dtest=TelegramInitDataValidatorTest,SessionServiceTest,AuthApiIntegrationTest,IdentityServiceIntegrationTest,TelegramConfigurationTest,TelegramStartIntegrationTest" test
+```
+
+Нужна работающая локальная PostgreSQL. Проверки используют отдельный тестовый
+токен, подписанные тестовые запросы и временных пользователей, которые удаляются.
+Получение событий настоящего бота в этих тестах отключено.
+Это проверка криптографии, фильтров, HTTP API и PostgreSQL. Проверка настоящего
+`initData`, переданного фронтендом из Telegram, выполняется при интеграции Mini App.
+
+После появления Mini App вход можно проверить из PowerShell, подставив свежую
+строку `Telegram.WebApp.initData` из открытого приложения:
+
+```powershell
+$initData = Read-Host 'Свежая строка Telegram.WebApp.initData'
+$body = @{ initData = $initData } | ConvertTo-Json
+$session = Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/v1/auth/telegram' -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+$headers = @{ Authorization = 'Bearer ' + $session.accessToken }
+$me = Invoke-RestMethod -Uri 'http://localhost:8080/api/v1/me' -Headers $headers
+$change = @{ expectedVersion = $me.profileVersion; industry = 'Торговля' } | ConvertTo-Json
+$me = Invoke-RestMethod -Method Patch -Uri 'http://localhost:8080/api/v1/me/profile' -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($change))
+Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/api/v1/auth/logout' -Headers $headers
+```
+
 ## Базы и миграции
 
 В одном экземпляре PostgreSQL две базы:
