@@ -1,5 +1,6 @@
 package com.alfatgbotik.telegram;
 
+import com.alfatgbotik.identity.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 class TelegramConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withBean(UserService.class, () -> mock(UserService.class))
             .withUserConfiguration(TelegramConfiguration.class);
 
     @Test
@@ -23,6 +25,7 @@ class TelegramConfigurationTest {
             assertThat(context).hasNotFailed();
             assertThat(context).doesNotHaveBean(TelegramClient.class);
             assertThat(context).doesNotHaveBean(TelegramConnectionCheck.class);
+            assertThat(context).doesNotHaveBean(TelegramPollingService.class);
         });
     }
 
@@ -41,6 +44,7 @@ class TelegramConfigurationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(TelegramClient.class);
                     assertThat(context).hasSingleBean(TelegramConnectionCheck.class);
+                    assertThat(context).hasSingleBean(TelegramPollingService.class);
                 });
     }
 

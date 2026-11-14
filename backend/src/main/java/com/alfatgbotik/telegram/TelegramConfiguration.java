@@ -1,5 +1,6 @@
 package com.alfatgbotik.telegram;
 
+import com.alfatgbotik.identity.service.UserService;
 import jakarta.annotation.PreDestroy;
 import okhttp3.OkHttpClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -32,8 +33,20 @@ public class TelegramConfiguration {
         return new TelegramConnectionCheck(telegramClient);
     }
 
+    @Bean
+    public TelegramUpdateHandler telegramUpdateHandler(UserService users, TelegramClient telegramClient) {
+        return new TelegramUpdateHandler(users, telegramClient);
+    }
+
+    @Bean(destroyMethod = "close")
+    public TelegramPollingService telegramPollingService(TelegramClient telegramClient,
+                                                        TelegramUpdateHandler updateHandler) {
+        return new TelegramPollingService(telegramClient, updateHandler);
+    }
+
     @PreDestroy
     public void close() {
+        httpClient.dispatcher().cancelAll();
         httpClient.dispatcher().executorService().shutdown();
         httpClient.connectionPool().evictAll();
     }
