@@ -5,7 +5,8 @@ Telegram-помощник для предпринимателей на мате�
 [ТЗ, архитектура и контракты команды](docs/README.md).
 
 Выполнены шаги 1 и 2: запуск Spring Boot и PostgreSQL с pgvector, миграции Flyway,
-проверка здоровья, хранение пользователей и бизнес-профилей. Подключение бота,
+проверка здоровья, хранение пользователей и бизнес-профилей. На шаге 3.2 подключён
+Telegram-клиент и проверка токена через `getMe`. Получение событий, команды бота,
 HTTP API с авторизацией и модель будут добавляться на следующих шагах.
 
 ## Запуск через Docker
@@ -55,9 +56,73 @@ docker compose stop
 |---|---|---|
 | `BACKEND_PORT` | `8080` | Порт бэкенда на компьютере |
 | `POSTGRES_PORT` | `5432` | Порт PostgreSQL на компьютере |
+| `TELEGRAM_BOT_ENABLED` | `false` | Включить Telegram-клиент и проверку `getMe` при запуске |
+| `TELEGRAM_BOT_TOKEN` | Пусто | Токен бота из BotFather; обязателен при включённом Telegram |
 
 Если порт занят, измените его в `.env` и повторите запуск. Внутренние порты
 контейнеров при этом остаются прежними.
+
+## Подключение Telegram: шаг 3.2
+
+Используется TelegramBots 10.3.0: модули `telegrambots-client` и
+`telegrambots-longpolling`. Получение событий пока не запускается.
+
+В локальном `.env` укажите `TELEGRAM_BOT_ENABLED=true` и свой
+`TELEGRAM_BOT_TOKEN`. Значения записываются как `KEY=VALUE`, без `export` и кавычек.
+Токен не добавляется в `env.example` и исходный код.
+
+При запуске из корня проекта Spring читает `.env` как файл properties через
+`spring.config.import`. Если файла нет, Telegram по умолчанию отключён.
+Переменные окружения имеют приоритет над значениями файла.
+В Docker Compose настройки явно передаются в окружение контейнера; сам `.env`
+не копируется в образ и не монтируется в контейнер.
+
+Для IDEA: выберите JDK 21, основной класс
+`com.alfatgbotik.AlfaTgBotikApplication`, модуль `alfa-tg-botik` и рабочую папку —
+корень репозитория, где находится `.env`. Локальная конфигурация `Alfa TG Botik`
+с этими параметрами сохранена в `.idea/runConfigurations/` и исключена из Git.
+Другой участник создаёт такую конфигурацию у себя по указанным параметрам.
+После изменения `pom.xml` выполните Reload All Maven Projects в окне Maven IDEA.
+
+Перед запуском из IDEA поднимите PostgreSQL и освободите порт бэкенда:
+
+```shell
+docker compose up -d --wait postgres
+docker compose stop backend
+```
+
+Для запуска из терминала можно собрать JAR и выполнить его из корня проекта:
+
+```powershell
+.\backend\mvnw.cmd -f backend/pom.xml --batch-mode --no-transfer-progress -DskipTests package
+java -jar backend/target/alfa-tg-botik.jar
+```
+
+На macOS/Linux для сборки используйте
+`sh backend/mvnw -f backend/pom.xml --batch-mode --no-transfer-progress -DskipTests package`.
+
+Для Docker пересоберите только бэкенд при работающей PostgreSQL:
+
+```shell
+docker compose up --build -d --no-deps --wait backend
+docker compose logs backend
+```
+
+При включённом Telegram приложение один раз вызывает `getMe`. Успех обозначается
+строкой `Telegram connected: @<username> (id=<botId>)`. Токен в неё не включается.
+Если токен отсутствует либо `getMe` не выполнен, запуск завершается ошибкой.
+Ожидание одного вызова API ограничено 15 секундами. Отключение Telegram через
+`TELEGRAM_BOT_ENABLED=false` позволяет запустить приложение без обращения к Bot API.
+
+Эта проверка не читает сообщения и не отправляет их. Ответ на `/start` появится
+после подключения обработчика на следующем подшаге. `/actuator/health` проверяет
+здоровье приложения и БД; он не выполняет повторные запросы `getMe`.
+
+Короткие проверки конфигурации из папки `backend`:
+
+```powershell
+.\mvnw.cmd --batch-mode --no-transfer-progress "-Dtest=TelegramConfigurationTest" test
+```
 
 ## Базы и миграции
 
@@ -158,7 +223,10 @@ Wrapper закреплён на Maven 3.9.16.
 
 Для Java доступны `DB_HOST` (по умолчанию `localhost`) и `DB_PORT` (по умолчанию
 `5432`). Если меняли `POSTGRES_PORT` в Compose, передайте такой же `DB_PORT` процессу
-Java. Файл `.env` читает Compose; IDE и Maven не загружают его автоматически.
+Java. Spring загружает `.env` из текущей рабочей папки, поэтому для настроенного
+Telegram запускайте приложение из корня репозитория. Maven `spring-boot:run`
+из папки `backend` по умолчанию использует `backend` как рабочую папку;
+для Telegram используйте конфигурацию IDEA или запуск JAR из корня, описанные выше.
 
 ## Пользователь и профиль бизнеса
 

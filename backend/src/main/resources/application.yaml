@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: alfa-tg-botik
   datasource:
@@ -16,6 +18,10 @@ spring:
   sql:
     init:
       mode: never
+
+telegram:
+  enabled: ${TELEGRAM_BOT_ENABLED:false}
+  token: ${TELEGRAM_BOT_TOKEN:}
 
 management:
   endpoints:
