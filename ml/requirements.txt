@@ -1,2 +1,4 @@
-# Внешних Python-зависимостей нет: используется стандартная библиотека Python 3.9+.
-# Для команды export нужен Docker Compose и PostgreSQL из compose.yaml проекта.
+# Импорт PGDMP, русская морфология BM25 и точный бюджет контекста Qwen.
+pgdumplib==4.0.0
+snowballstemmer==3.0.1
+tokenizers==0.23.3

@@ -11,6 +11,7 @@
 | [OpenAPI](contracts/backend.openapi.yaml) | Методы и типы API, импорт в инструменты разработки |
 | [Подготовка знаний](contracts/data/README.md) | ML 1 и бэкенд |
 | [Работа с моделью](contracts/llm/README.md) | ML 2 и бэкенд |
+| [Подключение текущего RAG](RAG_BACKEND_INTEGRATION.md) | Бэкенд: запуск, JSONL worker, Java-пример, ограничения Docker и перенос в Spring AI |
 
 Подготовлен минимальный запуск Java и PostgreSQL с Flyway и проверкой здоровья.
 Пользовательские функции пока не реализованы. Инструкции запуска находятся в корневом README.

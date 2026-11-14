@@ -16,12 +16,17 @@ import rag
 
 
 EMBED_MODEL = "embeddinggemma:300m"
-CHAT_MODEL = "qwen3:4b"
+CHAT_MODEL = "qwen3.5:9b-q4_K_M"
 QUERY_PREFIX = "Instruct: Given a question from an entrepreneur, retrieve relevant Russian educational passages and course descriptions.\nQuery: "
 INDEX_VERSION = "1"
-PROMPT_VERSION = "consultation-3"
+PROMPT_VERSION = "consultation-6"
+DEFAULT_STRATEGY = "hybrid_dense"
+DEFAULT_MIN_SCORE = .35
+DEFAULT_MAX_PER_MATERIAL = 2
+DEFAULT_ANSWER_MODE = "extracts"
 CONTEXT_SIZE = 16384
 OUTPUT_TOKENS = 1200
+CHAT_BATCH_SIZE = 512
 MAX_SOURCES = 3
 MAX_CATALOG = 3
 MAX_DESCRIPTION_CHARS = 200
@@ -35,6 +40,10 @@ SYSTEM_PROMPT = """Ты помощник предпринимателя на м�
 Факты бери ТОЛЬКО из sources. Не выдумывай знания или профиль; старые сведения
 не объявляй действующими законами. catalog нужен только для рекомендаций;
 платный текст не раскрывай. Не возвращай URL, SQL, Markdown или рассуждения.
+Не придумывай числовые условия, сроки, цены и показатели. Числа из примера
+про другой товар или отрасль не переноси на бизнес пользователя.
+Если подходящий срок не указан в sources, предложи определить его по данным
+бизнеса, без конкретного числа. Не считай предположения из history фактами.
 Верни JSON: status, answer, sourceIds, recommendations.
 Если источники содержат ответ, выбирай ANSWER. Пустой профиль не требует уточнения.
 ANSWER: два коротких практических действия, всего до 420 символов, и ID
@@ -155,6 +164,8 @@ def fingerprint(dataset):
 
 def index_dataset(dataset, client, embed_model=EMBED_MODEL, batch_size=16):
     """Два пространства поиска: тексты ответов и карточки рекомендаций."""
+    if type(batch_size) is not int or not 1 <= batch_size <= 128:
+        raise RagError("batch_size должен быть целым числом от 1 до 128")
     dataset = dataset.resolve()
     signature = fingerprint(dataset)
     model = client.model(embed_model)
@@ -218,6 +229,11 @@ def index_dataset(dataset, client, embed_model=EMBED_MODEL, batch_size=16):
 
 class Retriever:
     def __init__(self, dataset, client):
+        self.strategy = DEFAULT_STRATEGY
+        self.max_per_material = DEFAULT_MAX_PER_MATERIAL
+        self.llm_rerank = False
+        self._lexical = None
+        self._last_ranking = None
         self.dataset = dataset.resolve()
         self.client = client
         signature = fingerprint(self.dataset)
@@ -243,32 +259,65 @@ class Retriever:
         if {(k, i) for k, i, _ in self.vectors} != expected:
             raise RagError("Неверные ID в семантическом индексе")
 
-    def retrieve(self, query, limit=5, min_score=0.45):
-        if not query.strip() or len(query) > 8000 or not 1 <= limit <= 8 or not 0 <= min_score <= 1:
+    def retrieve(self, query, limit=5, min_score=DEFAULT_MIN_SCORE):
+        if (not isinstance(query, str) or not query.strip() or len(query) > 8000
+                or type(limit) is not int or not 1 <= limit <= 8
+                or type(min_score) not in {int, float} or not math.isfinite(min_score) or not 0 <= min_score <= 1
+                or type(self.max_per_material) is not int or not 1 <= self.max_per_material <= 5):
             raise RagError("Некорректный запрос/параметры поиска")
         model = self.config["embeddingModel"]
         if self.client.model(model["name"])["digest"] != model["digest"]:
             raise RagError("Embedding-модель изменилась: нужен новый индекс")
-        vector = self.client.embed(model["name"], [self.config["queryPrefix"] + query])[0]
-        if len(vector) != self.dimension:
-            raise RagError("Размерность запроса не совпадает с индексом")
-        ranked = {"chunk": [], "material": []}
-        for kind, item_id, embedding in self.vectors:
-            score = sum(a * b for a, b in zip(vector, embedding))
-            if score >= min_score:
-                ranked[kind].append((score, item_id))
+        if self._last_ranking and self._last_ranking[0] == query:
+            all_ranked = self._last_ranking[1]
+        else:
+            vector = self.client.embed(model["name"], [self.config["queryPrefix"] + query])[0]
+            if len(vector) != self.dimension:
+                raise RagError("Размерность запроса не совпадает с индексом")
+            all_ranked = {"chunk": [], "material": []}
+            for kind, item_id, embedding in self.vectors:
+                score = sum(a * b for a, b in zip(vector, embedding))
+                all_ranked[kind].append((score, item_id))
+            self._last_ranking = (query, all_ranked)
+        ranked = {kind: [(score, cid) for score, cid in values if score >= min_score]
+                  for kind, values in all_ranked.items()}
         for values in ranked.values():
             values.sort(key=lambda row: (-row[0], row[1]))
-        hits, seen = [], set()
+        fusion_scores = {}
+        if self.strategy != "dense":
+            from lexical import LexicalIndex, reciprocal_rank_fusion
+            if self.strategy not in {"bm25", "hybrid", "hybrid_dense"}:
+                raise RagError("Неизвестная стратегия поиска")
+            if self._lexical is None:
+                self._lexical = LexicalIndex([(cid, self.materials[c["materialId"]]["title"], c["text"])
+                                             for cid, c in self.chunks.items()])
+            lexical = self._lexical.rank(query)
+            dense_ids = [cid for _, cid in ranked["chunk"]]
+            if self.strategy == "bm25":
+                order = [cid for cid, _ in lexical]
+            else:
+                order, fusion_scores = reciprocal_rank_fusion(dense_ids, [cid for cid, _ in lexical],
+                                                              dense_weight=.75 if self.strategy == "hybrid_dense" else .5)
+            dense_scores = {cid: score for score, cid in ranked["chunk"]}
+            ranked["chunk"] = [(dense_scores[cid], cid) for cid in order if cid in dense_scores]
+        hits, counts = [], {}
         for score, item_id in ranked["chunk"]:
             chunk = self.chunks[item_id]
-            if chunk["materialId"] in seen:
+            if counts.get(chunk["materialId"], 0) >= self.max_per_material:
                 continue
-            seen.add(chunk["materialId"])
+            counts[chunk["materialId"]] = counts.get(chunk["materialId"], 0) + 1
             material = self.materials[chunk["materialId"]]
             hits.append({"score": round(score, 6), **chunk, "title": material["title"], "url": material["url"]})
-            if len(hits) == limit:
+            if len(hits) == (8 if self.llm_rerank else limit):
                 break
+        rerank_error = None
+        if self.llm_rerank and len(hits) > 1:
+            from rerank import rerank
+            try:
+                hits = rerank(self.client, CHAT_MODEL, query, hits)
+            except (ValueError, KeyError, RagError) as error:
+                rerank_error = str(error)
+        hits = hits[:limit]
         catalog_ids = []
         # Материалы использованных источников и их курсы должны быть доступны модели.
         for hit in hits:
@@ -278,7 +327,9 @@ class Retriever:
         catalog_ids = list(dict.fromkeys(catalog_ids))[:12]
         return {"sources": hits, "catalog": [self.materials[i] for i in catalog_ids],
                 "catalogScores": {item_id: round(score, 6) for score, item_id in ranked["material"] if item_id in catalog_ids},
-                "minScore": min_score, "thresholdCalibrated": False}
+                "minScore": min_score, "thresholdCalibrated": False,
+                "strategy": self.strategy, "fusionScores": fusion_scores,
+                "rerankRequested": self.llm_rerank, "rerankError": rerank_error}
 
 
 def response_schema(sources, catalog):
@@ -338,8 +389,10 @@ def validate_response(result, sources, catalog):
 
 def load_context(path=None):
     context = {"profile": {}, "history": [], "currentPlan": None}
+    if path is not None and not isinstance(path, (dict, Path)):
+        raise RagError("Контекст должен быть JSON-объектом или путём к JSON")
     if path:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = path if isinstance(path, dict) else json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict) or set(raw) - set(context):
             raise RagError("Контекст: допустимы только profile, history, currentPlan")
         context.update(raw)
@@ -367,8 +420,19 @@ def load_context(path=None):
     return context
 
 
-def make_input(question, retrieved, context, now):
-    sources = [{key: hit[key] for key in ("chunkId", "materialId", "title", "text")} for hit in retrieved["sources"][:MAX_SOURCES]]
+def make_input(question, retrieved, context, now, answer_mode="generative", token_counter=None, compression="none"):
+    source_limit = MAX_SOURCES
+    sources = [{key: hit[key] for key in ("chunkId", "materialId", "title", "text")} for hit in retrieved["sources"][:source_limit]]
+    if compression not in {"none", "window"}:
+        raise RagError("Неизвестный способ отбора контекста")
+    if compression == "window":
+        from context_selection import select_window
+        prior = [h["text"] for h in context["history"] if h["role"] == "USER"]
+        query = (prior[-1] + "\n" if prior and len(rag.tokens(question)) < 7 else "") + question
+        for source in sources:
+            selected, offsets = select_window(source["text"], query)
+            source["text"] = selected
+            source["sourceOffsets"] = list(offsets)
     scores = retrieved.get("catalogScores", {})
     candidates = sorted(retrieved["catalog"], key=lambda m: -scores.get(m["materialId"], -1))
     catalog = [{"id": m["materialId"], "title": m["title"], "kind": m["sourceType"],
@@ -381,7 +445,10 @@ def make_input(question, retrieved, context, now):
     # Оставляем резерв на chat template/выход. Не полагаемся на тихое усечение API.
     budget = CONTEXT_SIZE - OUTPUT_TOKENS - 1024
     def size():
-        return len((SYSTEM_PROMPT + json.dumps(payload, ensure_ascii=False)).encode("utf-8"))
+        from answer_policy import EVIDENCE_PROMPT, SELECTION_PROMPT
+        system = {"evidence": EVIDENCE_PROMPT, "extracts": SELECTION_PROMPT}.get(answer_mode, SYSTEM_PROMPT)
+        text = system + json.dumps(payload, ensure_ascii=False)
+        return token_counter(text) if token_counter else len(text.encode("utf-8"))
     while size() > budget:
         if payload["history"]:
             payload["history"] = payload["history"][1:]
@@ -397,7 +464,7 @@ def make_input(question, retrieved, context, now):
     return payload
 
 
-def model_request(payload):
+def model_request(payload, answer_mode="generative"):
     """Короткие ID действуют только внутри запроса; публичный контракт не меняется."""
     source_ids = {f"S{i}": row["chunkId"] for i, row in enumerate(payload["sources"], 1)}
     material_ids = {f"M{i}": row["id"] for i, row in enumerate(payload["catalog"], 1)}
@@ -414,7 +481,14 @@ def model_request(payload):
             data[key] = payload[key]
     # Стабильный контекст идёт до вопроса; секунды now больше не ломают его кэш.
     encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
+    from answer_policy import EVIDENCE_PROMPT, SELECTION_PROMPT, evidence_passages
+    system = {"evidence": EVIDENCE_PROMPT, "extracts": SELECTION_PROMPT}.get(answer_mode, SYSTEM_PROMPT)
+    if answer_mode == "extracts":
+        passages = evidence_passages(payload)
+        for index, source in enumerate(data["sources"], 1):
+            source.pop("text")
+            source["passages"] = [{"id": alias, "text": passage["text"]} for alias, passage in passages.items() if passage["sourceId"] == f"S{index}"]
+    messages = [{"role": "system", "content": system},
                 {"role": "user", "content": encode({**data, "question": payload["message"], "date": payload["now"][:10]})}]
     schema = {"type": "object", "additionalProperties": False,
               "required": ["status", "answer", "sourceIds", "recommendations"],
@@ -428,13 +502,32 @@ def model_request(payload):
                                                 "required": ["id", "reason"], "properties": {
                                                     "id": {"type": "string", **({"enum": list(material_ids)} if material_ids else {})},
                                                     "reason": {"type": "string", "minLength": 1, "maxLength": MODEL_REASON_CHARS}}}}}}
+    if answer_mode == "evidence":
+        schema = {"type": "object", "additionalProperties": False,
+                  "required": ["status", "quotes", "clarification", "recommendations"],
+                  "properties": {
+                      "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND"]},
+                      "quotes": {"type": "array", "maxItems": 2, "items": {
+                          "type": "object", "additionalProperties": False, "required": ["sourceId", "text"],
+                          "properties": {"sourceId": {"type": "string", **({"enum": list(source_ids)} if source_ids else {})},
+                                         "text": {"type": "string", "minLength": 20, "maxLength": 200}}}},
+                      "clarification": {"type": "string", "maxLength": 300},
+                      "recommendations": schema["properties"]["recommendations"]}}
+    elif answer_mode == "extracts":
+        schema = {"type": "object", "additionalProperties": False,
+                  "required": ["status", "evidenceIds", "clarification", "recommendations"],
+                  "properties": {
+                      "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND"]},
+                      "evidenceIds": {"type": "array", "maxItems": 2, "items": {"type": "string", **({"enum": list(passages)} if passages else {})}},
+                      "clarification": {"type": "string", "maxLength": 300},
+                      "recommendations": schema["properties"]["recommendations"]}}
     return messages, schema, source_ids, material_ids
 
 
-def expand_model_response(value, payload, source_ids, material_ids):
+def expand_model_response(value, payload, source_ids, material_ids, answer_limit=MODEL_ANSWER_CHARS):
     if not isinstance(value, dict) or set(value) != {"status", "answer", "sourceIds", "recommendations"}:
         raise RagError("Короткий ответ модели: неверный набор полей")
-    if not isinstance(value["answer"], str) or not 1 <= len(value["answer"].strip()) <= MODEL_ANSWER_CHARS:
+    if not isinstance(value["answer"], str) or not 1 <= len(value["answer"].strip()) <= answer_limit:
         raise RagError("Короткий ответ модели: длина answer")
     normalize_question = lambda text: " ".join(text.casefold().split()).strip(" .!?")
     if value["status"] == "CLARIFY" and normalize_question(value["answer"]) == normalize_question(payload.get("message", "")):
@@ -460,20 +553,41 @@ def expand_model_response(value, payload, source_ids, material_ids):
     return validate_response(result, payload["sources"], payload["catalog"])
 
 
-def ask(retriever, question, client, chat_model=CHAT_MODEL, context=None, min_score=0.45, timeout=60):
+def ask(retriever, question, client, chat_model=CHAT_MODEL, context=None, min_score=DEFAULT_MIN_SCORE, timeout=60, answer_mode=DEFAULT_ANSWER_MODE, compression="none"):
     previous = getattr(client, "deadline", None)
     client.deadline = time.monotonic() + timeout
     try:
-        return _ask(retriever, question, client, chat_model, context, min_score, timeout)
+        return _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression)
     finally:
         client.deadline = previous
 
 
-def _ask(retriever, question, client, chat_model, context, min_score, timeout):
+def policy_result(policy, started, answer_mode):
+    response = {"schemaVersion": rag.SCHEMA, "status": policy["status"], "answer": policy["answer"],
+                "sourceChunkIds": [], "recommendations": [], "profilePatch": {},
+                "planProposal": None, "reminderProposal": None}
+    validate_response(response, [], [])
+    return {"response": response, "references": [], "recommendationCards": [], "diagnostics": {
+        "elapsedSeconds": round(time.monotonic()-started, 3), "route": policy["route"],
+        "answerMode": answer_mode, "attempts": 0, "sources": [], "sourceChunkIdsSent": [],
+        "sourcesSent": 0, "catalogSent": 0, "promptVersion": PROMPT_VERSION}}
+
+
+def _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression):
     started = time.monotonic()
     if not isinstance(question, str) or not 1 <= len(question.strip()) <= 4000:
         raise RagError("Вопрос должен содержать от 1 до 4000 символов")
-    context = context or load_context()
+    if answer_mode not in {"generative", "evidence", "extracts"}:
+        raise RagError("Неизвестный режим ответа")
+    context = load_context(context)
+    from answer_policy import route_question, expand_evidence, expand_selection
+    routed = route_question(question, context)
+    if routed:
+        return policy_result(routed, started, answer_mode)
+    from calculation import parse_breakeven, formula_source, calculation_result
+    calculation = parse_breakeven(question)
+    if calculation and calculation["status"] == "CLARIFY":
+        return policy_result(calculation, started, answer_mode)
     model = client.model(chat_model)
     # У короткого продолжения диалога используем предыдущий вопрос как контекст поиска.
     query = question
@@ -482,10 +596,27 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout):
         if prior:
             query = prior[-1][:600] + "\n" + question
     retrieved = retriever.retrieve(query, min_score=min_score)
-    payload = make_input(question, retrieved, context, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
-    messages, schema, source_ids, material_ids = model_request(payload)
+    if len(rag.tokens(question)) < 7 and not context["history"] and context["profile"].get("currentTask"):
+        query = context["profile"]["currentTask"][:600] + "\n" + question
+        retrieved = retriever.retrieve(query, min_score=min_score)
+    if calculation:
+        source = formula_source(retrieved["sources"])
+        if source is None:
+            source = formula_source(retriever.retrieve("Точка безубыточности постоянные расходы маржа единицы товара", limit=8, min_score=min_score)["sources"])
+        if source is not None:
+            result = calculation_result(calculation, source, retriever, round(time.monotonic()-started, 3))
+            validate_response(result["response"], [source[0]], [])
+            return result
+        return policy_result({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER, "route": "calculation_no_formula"}, started, answer_mode)
+    if not retrieved["sources"]:
+        return policy_result({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER, "route": "no_context"}, started, answer_mode)
+    from token_budget import local_token_counter
+    token_counter = local_token_counter(chat_model) if answer_mode in {"evidence", "extracts"} else None
+    payload = make_input(question, retrieved, context, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), answer_mode, token_counter, compression)
+    messages, schema, source_ids, material_ids = model_request(payload, answer_mode)
     input_bytes = sum(len(m["content"].encode("utf-8")) for m in messages)
     response = None
+    selected_evidence_ids = []
     for attempt in range(2):
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
@@ -493,13 +624,20 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout):
         raw = client.request("/api/chat", {"model": chat_model, "messages": messages,
                              "format": schema, "stream": False, "think": False,
                              "keep_alive": "5m", "options": {"temperature": 0, "seed": 42,
-                                 "num_ctx": CONTEXT_SIZE, "num_predict": OUTPUT_TOKENS}}, timeout=remaining)
+                                 "num_ctx": CONTEXT_SIZE, "num_predict": OUTPUT_TOKENS,
+                                 "num_batch": CHAT_BATCH_SIZE}}, timeout=remaining)
         try:
             if raw.get("done_reason") == "length" or raw.get("done") is not True:
                 raise RagError("Модель не закончила ответ")
             if raw.get("prompt_eval_count", 0) >= CONTEXT_SIZE - OUTPUT_TOKENS:
                 raise RagError("Превышен бюджет входного контекста")
-            response = expand_model_response(json.loads(raw["message"]["content"]), payload, source_ids, material_ids)
+            value = json.loads(raw["message"]["content"])
+            if answer_mode == "evidence":
+                value = expand_evidence(value, payload, source_ids)
+            elif answer_mode == "extracts":
+                selected_evidence_ids = value.get("evidenceIds", [])
+                value = expand_selection(value, payload)
+            response = expand_model_response(value, payload, source_ids, material_ids, 900 if answer_mode == "extracts" else MODEL_ANSWER_CHARS)
             break
         except (ValueError, KeyError, TypeError, RagError):
             if attempt:
@@ -520,8 +658,16 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout):
             "diagnostics": {"elapsedSeconds": round(time.monotonic() - started, 3),
                             "embeddingModel": retriever.config["embeddingModel"], "chatModel": model,
                             "promptVersion": PROMPT_VERSION, "attempts": attempt + 1,
-                            "modelInputBytes": input_bytes, "modelResponseFormat": "compact-1",
+                            "modelInputBytes": input_bytes, "modelResponseFormat": "extract-selection-1" if answer_mode == "extracts" else "compact-1",
                             "minScore": min_score, "thresholdCalibrated": False,
+                            "answerMode": answer_mode, "route": "consultation",
+                            "retrievalStrategy": retriever.strategy,
+                            "rerankError": retrieved.get("rerankError"),
+                            "tokenBudgetMode": "qwen-tokenizer+1024-reserve" if token_counter else "utf8-byte-upper-bound",
+                            "compression": compression,
+                            "sourceSpansSent": [{"chunkId": s["chunkId"], "offsets": s.get("sourceOffsets", [0, len(s["text"])])} for s in payload["sources"]],
+                            "groundingCheck": "exact source extracts; relevance not guaranteed" if answer_mode in {"evidence", "extracts"} else "IDs only",
+                            "selectedEvidenceIds": selected_evidence_ids,
                             "sources": [{"chunkId": r["chunkId"], "materialId": r["materialId"], "score": r["score"]} for r in retrieved["sources"]],
                             "sourcesSent": len(payload["sources"]), "catalogSent": len(payload["catalog"]),
                             "sourceChunkIdsSent": [r["chunkId"] for r in payload["sources"]],

@@ -687,11 +687,21 @@ def search(folder, query, limit):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def timeout_seconds(value):
+    seconds = int(value)
+    if not 1 <= seconds <= 600:
+        raise argparse.ArgumentTypeError("timeout должен быть от 1 до 600 секунд")
+    return seconds
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     export = sub.add_parser("export", help="Прочитать alfa_source; не изменяет БД")
     export.add_argument("--output", type=Path, default=ROOT / "data/source/ml_snapshot.json")
+    backup = sub.add_parser("import-backup", help="Снимок из .backup или ZIP без PostgreSQL/Docker")
+    backup.add_argument("source", type=Path)
+    backup.add_argument("--output", type=Path, default=ROOT / "data/source/ml_snapshot.json")
     audit = sub.add_parser("audit", help="Сводка структуры локального снимка")
     audit.add_argument("snapshot", type=Path)
     prep = sub.add_parser("prepare", help="Очистить и записать проверенную новую версию")
@@ -712,20 +722,41 @@ def main():
     retrieve.add_argument("dataset", type=Path)
     retrieve.add_argument("query")
     retrieve.add_argument("--limit", type=int, default=5, choices=range(1, 9))
-    retrieve.add_argument("--min-score", type=float, default=0.45)
+    retrieve.add_argument("--min-score", type=float, default=0.35)
     answer = sub.add_parser("ask", help="Получить ответ локальной модели по найденным источникам")
     answer.add_argument("dataset", type=Path)
     answer.add_argument("question")
-    answer.add_argument("--chat-model", default="qwen3:4b")
+    answer.add_argument("--chat-model", default="qwen3.5:9b-q4_K_M")
     answer.add_argument("--context", type=Path, help="Локальный JSON с profile/history/currentPlan")
-    answer.add_argument("--min-score", type=float, default=0.45)
+    answer.add_argument("--min-score", type=float, default=0.35)
+    answer.add_argument("--timeout", type=timeout_seconds, default=60, metavar="SECONDS")
+    chat = sub.add_parser("chat", help="Диалог в терминале с историей и источниками")
+    chat.add_argument("dataset", type=Path)
+    chat.add_argument("--chat-model", default="qwen3.5:9b-q4_K_M")
+    chat.add_argument("--context", type=Path)
+    chat.add_argument("--min-score", type=float, default=0.35)
+    chat.add_argument("--timeout", type=timeout_seconds, default=60, metavar="SECONDS")
     evaluate = sub.add_parser("evaluate", help="Recall/HitRate поиска по размеченному JSONL")
     evaluate.add_argument("dataset", type=Path)
     evaluate.add_argument("cases", type=Path)
     evaluate.add_argument("--limit", type=int, default=5, choices=range(1, 9))
-    evaluate.add_argument("--min-score", type=float, default=0.45)
+    evaluate.add_argument("--min-score", type=float, default=0.35)
+    for command in [retrieve, answer, chat, evaluate]:
+        command.add_argument("--strategy", choices=["dense", "bm25", "hybrid", "hybrid_dense"], default="hybrid_dense")
+        command.add_argument("--max-per-material", type=int, choices=range(1, 6), default=2)
+        command.add_argument("--rerank", action="store_true", help="Экспериментальный локальный reranker")
+    for command in [answer, chat]:
+        command.add_argument("--answer-mode", choices=["generative", "evidence", "extracts"], default="extracts")
+        command.add_argument("--compression", choices=["none", "window"], default="none")
     args = parser.parse_args()
-    if args.command == "export":
+    if args.command == "import-backup":
+        from import_backup import import_backup
+        print(json.dumps(import_backup(args.source, args.output), ensure_ascii=False, indent=2))
+    elif args.command == "chat":
+        from local_chat import chat
+        chat(args.dataset, args.chat_model, args.context, args.min_score, args.timeout,
+             args.strategy, args.max_per_material, args.rerank, args.answer_mode, args.compression)
+    elif args.command == "export":
         output = args.output.resolve()
         if not output.is_relative_to((ROOT / "data/source").resolve()):
             raise ValueError("Исходные данные можно сохранять только внутри data/source/")
@@ -748,10 +779,12 @@ def main():
             result = index_dataset(args.dataset, client, args.embedding_model, args.batch_size)
         else:
             retriever = Retriever(args.dataset, client)
+            retriever.strategy, retriever.max_per_material, retriever.llm_rerank = args.strategy, args.max_per_material, args.rerank
             if args.command == "retrieve":
                 result = retriever.retrieve(args.query, args.limit, args.min_score)
             elif args.command == "ask":
-                result = ask(retriever, args.question, client, args.chat_model, load_context(args.context), args.min_score)
+                result = ask(retriever, args.question, client, args.chat_model, load_context(args.context), args.min_score, args.timeout,
+                             args.answer_mode, args.compression)
             else:
                 result = evaluate_search(retriever, args.cases, args.limit, args.min_score)
         print(json.dumps(result, ensure_ascii=False, indent=2))

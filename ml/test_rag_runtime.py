@@ -261,7 +261,7 @@ class RuntimeTests(unittest.TestCase):
                      "answer": "Ответа нет. Ио не существует — это выдуманное утверждение.",
                      "recommendations": [{"id": "M1", "reason": "Непроверенное утверждение."}]}
             client.responses = [chat_response(value)]
-            result = runtime.ask(runtime.Retriever(path, client), "Посторонняя тема?", client, min_score=0)
+            result = runtime.ask(runtime.Retriever(path, client), "Посторонняя тема?", client, min_score=0, answer_mode="generative")
             self.assertEqual(result["response"]["answer"], runtime.NOT_FOUND_ANSWER)
             self.assertEqual(result["response"]["recommendations"], [])
             self.assertEqual(result["references"], [])
@@ -276,7 +276,7 @@ class RuntimeTests(unittest.TestCase):
             runtime.index_dataset(path, client)
             client.responses = [chat_response({"wrong": True}), chat_response(short_answer())]
             retriever = runtime.Retriever(path, client)
-            result = runtime.ask(retriever, "Как начать?", client, min_score=0)
+            result = runtime.ask(retriever, "Как сформулировать задачу и оценить доступные ресурсы?", client, min_score=0, answer_mode="generative")
             self.assertEqual(result["diagnostics"]["attempts"], 2)
             self.assertEqual(result["references"][0]["url"], materials[0]["url"])
             chats = [payload for endpoint, payload in client.requests if endpoint == "/api/chat"]
@@ -344,7 +344,7 @@ class RuntimeTests(unittest.TestCase):
             runtime.index_dataset(path, client)
             client.responses = [chat_response({}), chat_response({})]
             with self.assertRaises(runtime.RagError):
-                runtime.ask(runtime.Retriever(path, client), "Вопрос", client, min_score=0)
+                runtime.ask(runtime.Retriever(path, client), "Вопрос", client, min_score=0, answer_mode="generative")
 
 
 if __name__ == "__main__":
