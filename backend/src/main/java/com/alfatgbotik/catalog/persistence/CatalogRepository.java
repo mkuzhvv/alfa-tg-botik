@@ -10,6 +10,7 @@ import com.alfatgbotik.catalog.model.MaterialKind;
 import com.alfatgbotik.catalog.model.SearchDocument;
 import com.alfatgbotik.catalog.model.SearchHit;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -19,6 +20,8 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -64,6 +67,13 @@ public class CatalogRepository {
                 """, (row, number) -> new MaterialCardDto(row.getObject("id", UUID.class), row.getString("title"),
                 MaterialKind.valueOf(row.getString("source_type")), row.getString("description"), null,
                 row.getBoolean("is_paid"), row.getString("duration"), row.getString("url")), id).stream().findFirst();
+    }
+
+    public List<UUID> findMaterialIds(String datasetVersion, Set<UUID> ids) {
+        return new NamedParameterJdbcTemplate(jdbc).query("""
+                SELECT id FROM knowledge.materials WHERE dataset_version = :version AND id IN (:ids)
+                """, Map.of("version", datasetVersion, "ids", ids), (row, number) ->
+                row.getObject("id", UUID.class));
     }
 
     public void lockImport() {
