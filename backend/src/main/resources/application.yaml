@@ -23,6 +23,9 @@ telegram:
   enabled: ${TELEGRAM_BOT_ENABLED:false}
   token: ${TELEGRAM_BOT_TOKEN:}
 
+knowledge:
+  ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+
 management:
   endpoints:
     web:

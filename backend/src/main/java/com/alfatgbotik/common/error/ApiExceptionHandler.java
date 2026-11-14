@@ -1,6 +1,8 @@
 package com.alfatgbotik.common.error;
 
 import com.alfatgbotik.identity.service.TelegramAuthUnavailableException;
+import com.alfatgbotik.catalog.service.MaterialNotFoundException;
+import com.alfatgbotik.catalog.service.KnowledgeUnavailableException;
 import com.alfatgbotik.identity.service.ProfileVersionConflictException;
 import com.alfatgbotik.identity.service.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,7 +47,7 @@ public class ApiExceptionHandler {
         return problems.response(request, 409, "VERSION_CONFLICT", List.of());
     }
 
-    @ExceptionHandler({UserNotFoundException.class, NoResourceFoundException.class})
+    @ExceptionHandler({UserNotFoundException.class, MaterialNotFoundException.class, NoResourceFoundException.class})
     public ResponseEntity<ApiProblem> notFound(HttpServletRequest request) {
         return problems.response(request, 404, "NOT_FOUND", List.of());
     }
@@ -73,7 +75,7 @@ public class ApiExceptionHandler {
         return problems.response(request, 415, "MALFORMED_REQUEST", List.of());
     }
 
-    @ExceptionHandler(TelegramAuthUnavailableException.class)
+    @ExceptionHandler({TelegramAuthUnavailableException.class, KnowledgeUnavailableException.class})
     public ResponseEntity<ApiProblem> authUnavailable(HttpServletRequest request) {
         return problems.response(request, 503, "SERVICE_UNAVAILABLE", List.of());
     }
