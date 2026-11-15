@@ -30,8 +30,6 @@ ssh -T -o IdentityAgent=none -o IdentitiesOnly=yes -o IdentityFile=none -o Serve
 
 При первом подключении SSH запросит подтверждение ключа сервера. Аккаунт и личный
 SSH-ключ для `nokey` не нужны. Команда выведет HTTPS-адрес, ведущий к локальному nginx.
-На проверенном компьютере этот способ работает при включённом Happ TUN; менять VPN
-или системный DNS не требуется.
 
 Полученную HTTPS-ссылку укажите в корневом `.env` как `TELEGRAM_MINI_APP_URL`,
 затем выполните `docker compose up -d --no-deps --wait backend`. При запуске Java зарегистрирует
