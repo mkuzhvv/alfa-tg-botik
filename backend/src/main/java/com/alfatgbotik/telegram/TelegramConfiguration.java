@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
@@ -41,6 +42,12 @@ public class TelegramConfiguration {
     @Bean
     public TelegramCommandRegistration telegramCommandRegistration(TelegramClient telegramClient) {
         return new TelegramCommandRegistration(telegramClient);
+    }
+
+    @Bean
+    public TelegramMiniAppMenu telegramMiniAppMenu(TelegramClient telegramClient,
+                                                  @Value("${telegram.mini-app-url:}") String url) {
+        return new TelegramMiniAppMenu(telegramClient, url);
     }
 
     @Bean

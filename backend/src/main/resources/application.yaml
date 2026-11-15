@@ -33,6 +33,7 @@ spring:
 telegram:
   enabled: ${TELEGRAM_BOT_ENABLED:false}
   token: ${TELEGRAM_BOT_TOKEN:}
+  mini-app-url: ${TELEGRAM_MINI_APP_URL:}
 
 knowledge:
   ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}

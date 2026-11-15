@@ -30,6 +30,7 @@ services:
       DB_PORT: 5432
       TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_MINI_APP_URL: ${TELEGRAM_MINI_APP_URL:-}
       OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen3.5:9b-q4_K_M}
       ASSISTANT_MODEL_REVISION: ${ASSISTANT_MODEL_REVISION:-56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90}
@@ -48,6 +49,26 @@ services:
       timeout: 3s
       retries: 6
       start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    image: alfa-tg-botik-frontend:local
+    build:
+      context: .
+      dockerfile: dockerfiles/frontend/Dockerfile
+      args:
+        VITE_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-alfa_business_helper_bot}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8081}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
