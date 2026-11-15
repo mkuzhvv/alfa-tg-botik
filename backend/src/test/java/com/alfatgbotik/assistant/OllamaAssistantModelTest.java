@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -27,6 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OllamaAssistantModelTest {
 
     private final JsonMapper json = JsonMapper.builder().build();
+    private final UUID chunkId = UUID.randomUUID();
+    private final UUID materialId = UUID.randomUUID();
 
     @Test
     void sendsSpringAiChatRequestWithSchemaAndDisabledThinking() throws Exception {
@@ -43,6 +46,11 @@ class OllamaAssistantModelTest {
             assertThat(request.get("options").get("num_ctx").intValue()).isEqualTo(16384);
             assertThat(request.get("options").get("seed").intValue()).isEqualTo(42);
             assertThat(request.get("format").get("required").size()).isEqualTo(8);
+            var properties = request.get("format").get("properties");
+            assertThat(properties.get("sourceChunkIds").get("items").get("enum"))
+                    .isEqualTo(json.valueToTree(List.of(chunkId.toString())));
+            assertThat(properties.get("recommendations").get("items").get("properties").get("materialId").get("enum"))
+                    .isEqualTo(json.valueToTree(List.of(materialId.toString())));
             assertThat(request.get("messages").get(0).get("role").stringValue()).isEqualTo("system");
             assertThat(json.readTree(request.get("messages").get(1).get("content").stringValue()).get("now").stringValue())
                     .isEqualTo("2026-11-15T10:00:00Z");
@@ -50,6 +58,18 @@ class OllamaAssistantModelTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void emptyCatalogForbidsReferencesWithoutAffectingAnotherRequestsSchema() throws Exception {
+        var prompt = new AssistantPrompt(json);
+        var populated = json.valueToTree(prompt.schema(context()));
+        var empty = new AssistantContext("0.1.0", Instant.now(), "Вопрос",
+                context().profile(), List.of(), List.of(), List.of(), null);
+        var properties = json.valueToTree(prompt.schema(empty)).get("properties");
+        assertThat(properties.get("sourceChunkIds").get("maxItems").intValue()).isZero();
+        assertThat(properties.get("recommendations").get("maxItems").intValue()).isZero();
+        assertThat(json.<JsonNode>valueToTree(prompt.schema(context()))).isEqualTo(populated);
     }
 
     @Test
@@ -102,6 +122,9 @@ class OllamaAssistantModelTest {
 
     private AssistantContext context() {
         return new AssistantContext("0.1.0", Instant.parse("2026-11-15T10:00:00Z"), "Вопрос",
-                new ProfileDto(null, null, null, null, null, null), List.of(), List.of(), List.of(), null);
+                new ProfileDto(null, null, null, null, null, null), List.of(),
+                List.of(new AssistantContext.Source(chunkId, materialId, "Материал", "Разрешённый источник")),
+                List.of(new AssistantContext.Material(materialId, "Материал", "ARTICLE", null, false, null,
+                        "https://example.test/material")), null);
     }
 }

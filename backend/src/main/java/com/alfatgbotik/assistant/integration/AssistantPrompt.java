@@ -4,6 +4,7 @@ import com.alfatgbotik.assistant.model.AssistantContext;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,13 +13,12 @@ import java.util.Map;
 @Component
 public class AssistantPrompt {
 
-    public static final String VERSION = "consultation-v2-actions-1";
+    public static final String VERSION = "consultation-v3-bounded-sources";
     public static final int CONTEXT_TOKENS = 16384;
     public static final int OUTPUT_TOKENS = 1200;
     private final JsonMapper json;
     private final String instructions;
     private final String schemaText;
-    private final Map<?, ?> schema;
 
     public AssistantPrompt(JsonMapper json) throws IOException {
         this.json = json;
@@ -32,7 +32,6 @@ public class AssistantPrompt {
         properties.set("reminderProposal", json.readTree("{\"type\":\"null\"}"));
         full.remove("$defs");
         schemaText = json.writeValueAsString(full);
-        schema = json.readValue(schemaText, Map.class);
     }
 
     public String instructions(String correction) {
@@ -44,12 +43,29 @@ public class AssistantPrompt {
         return json.writeValueAsString(context);
     }
 
-    public Map<?, ?> schema() {
-        return schema;
+    public Map<?, ?> schema(AssistantContext context) {
+        ObjectNode constrained = (ObjectNode) json.readTree(schemaText);
+        var properties = constrained.get("properties");
+        var sourceIds = context.sources().stream().map(source -> source.chunkId().toString()).distinct().toList();
+        var sources = (ObjectNode) properties.get("sourceChunkIds");
+        if (sourceIds.isEmpty()) {
+            sources.put("maxItems", 0);
+        } else {
+            ((ObjectNode) sources.get("items")).set("enum", json.valueToTree(sourceIds));
+        }
+        var materialIds = context.catalog().stream().map(material -> material.id().toString()).distinct().toList();
+        var recommendations = (ObjectNode) properties.get("recommendations");
+        recommendations.put("maxItems", Math.min(3, materialIds.size()));
+        if (!materialIds.isEmpty()) {
+            ((ObjectNode) recommendations.get("items").get("properties").get("materialId"))
+                    .set("enum", json.valueToTree(materialIds));
+        }
+        return json.readValue(json.writeValueAsString(constrained), Map.class);
     }
 
     public boolean fits(AssistantContext context, String correction) {
-        int bytes = (instructions(correction) + input(context) + schemaText).getBytes(StandardCharsets.UTF_8).length;
+        int bytes = (instructions(correction) + input(context) + json.writeValueAsString(schema(context)))
+                .getBytes(StandardCharsets.UTF_8).length;
         return bytes <= CONTEXT_TOKENS - OUTPUT_TOKENS - 1024;
     }
 }

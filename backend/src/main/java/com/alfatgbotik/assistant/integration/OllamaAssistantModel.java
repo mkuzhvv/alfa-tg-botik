@@ -21,6 +21,6 @@ public class OllamaAssistantModel implements AssistantModel {
         if (!prompt.fits(context, correction)) {
             throw new AssistantFailure("CONTEXT_TOO_LARGE");
         }
-        return gateway.complete(prompt.instructions(correction), context, prompt.schema(), AssistantPrompt.OUTPUT_TOKENS, deadline);
+        return gateway.complete(prompt.instructions(correction), context, prompt.schema(context), AssistantPrompt.OUTPUT_TOKENS, deadline);
     }
 }
