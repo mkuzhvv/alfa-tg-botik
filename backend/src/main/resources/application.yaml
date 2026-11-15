@@ -18,6 +18,17 @@ spring:
   sql:
     init:
       mode: never
+  quartz:
+    job-store-type: jdbc
+    auto-startup: false
+    wait-for-jobs-to-complete-on-shutdown: true
+    jdbc:
+      initialize-schema: never
+    properties:
+      org.quartz.scheduler.instanceName: alfa-reminders
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.tablePrefix: app.qrtz_
+      org.quartz.threadPool.threadCount: 2
 
 telegram:
   enabled: ${TELEGRAM_BOT_ENABLED:false}

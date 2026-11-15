@@ -47,6 +47,16 @@ public class PlanService {
         return plans.findOwned(userId, planId).orElseThrow(PlanNotFoundException::new);
     }
 
+    @Transactional(readOnly = true)
+    public void requireReminderStep(UUID userId, UUID stepId, UUID materialId) {
+        if (!plans.ownsStep(userId, stepId)) {
+            throw new PlanNotFoundException();
+        }
+        if (materialId != null && !plans.stepContainsMaterial(stepId, materialId)) {
+            throw new PlanValidationException("materialId", "Material must belong to the selected step");
+        }
+    }
+
     @Transactional
     public PlanDto saveProposal(UUID userId, PlanProposal proposal, Map<UUID, String> recommendationReasons,
                                  PlanReplacement replacement) {

@@ -7,6 +7,7 @@ import com.alfatgbotik.plan.service.PlanConflictException;
 import com.alfatgbotik.plan.service.PlanMaterialsNotFoundException;
 import com.alfatgbotik.plan.service.PlanNotFoundException;
 import com.alfatgbotik.plan.service.PlanValidationException;
+import com.alfatgbotik.reminder.service.ReminderException;
 import com.alfatgbotik.identity.service.ProfileVersionConflictException;
 import com.alfatgbotik.identity.service.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -54,6 +55,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PlanConflictException.class)
     public ResponseEntity<ApiProblem> planConflict(PlanConflictException exception, HttpServletRequest request) {
         return problems.response(request, 409, exception.getCode(), List.of());
+    }
+
+    @ExceptionHandler(ReminderException.class)
+    public ResponseEntity<ApiProblem> reminder(ReminderException exception, HttpServletRequest request) {
+        return problems.response(request, exception.getStatus(), exception.getCode(), List.of());
     }
 
     @ExceptionHandler(PlanValidationException.class)

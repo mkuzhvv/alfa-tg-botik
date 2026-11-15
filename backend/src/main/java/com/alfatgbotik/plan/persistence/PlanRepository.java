@@ -58,6 +58,19 @@ public class PlanRepository {
                 (row, number) -> StepStatus.valueOf(row.getString("status")), planId, stepId).stream().findFirst();
     }
 
+    public boolean ownsStep(UUID userId, UUID stepId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM app.plan_steps s JOIN app.plans p ON p.id = s.plan_id
+                               WHERE p.user_id = ? AND s.id = ?)
+                """, Boolean.class, userId, stepId));
+    }
+
+    public boolean stepContainsMaterial(UUID stepId, UUID materialId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM app.plan_step_materials WHERE step_id = ? AND material_id = ?)
+                """, Boolean.class, stepId, materialId));
+    }
+
     public void insertPlan(UUID planId, UUID userId, String goal, Instant now) {
         jdbc.update("""
                 INSERT INTO app.plans (id, user_id, goal, status, version, created_at, updated_at)
