@@ -5,6 +5,9 @@
 *.log
 *.backup
 *.dump
+.DS_Store
+.venv/
+data/*.zip
 
 data/source/*
 !data/source/.gitkeep
