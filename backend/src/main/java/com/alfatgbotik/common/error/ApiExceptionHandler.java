@@ -8,6 +8,8 @@ import com.alfatgbotik.plan.service.PlanMaterialsNotFoundException;
 import com.alfatgbotik.plan.service.PlanNotFoundException;
 import com.alfatgbotik.plan.service.PlanValidationException;
 import com.alfatgbotik.reminder.service.ReminderException;
+import com.alfatgbotik.assistant.service.ActionException;
+import com.alfatgbotik.assistant.service.AssistantFailure;
 import com.alfatgbotik.identity.service.ProfileVersionConflictException;
 import com.alfatgbotik.identity.service.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -60,6 +62,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ReminderException.class)
     public ResponseEntity<ApiProblem> reminder(ReminderException exception, HttpServletRequest request) {
         return problems.response(request, exception.getStatus(), exception.getCode(), List.of());
+    }
+
+    @ExceptionHandler(ActionException.class)
+    public ResponseEntity<ApiProblem> action(ActionException exception, HttpServletRequest request) {
+        return problems.response(request, exception.status(), exception.code(), List.of());
+    }
+
+    @ExceptionHandler(AssistantFailure.class)
+    public ResponseEntity<ApiProblem> modelFailure(HttpServletRequest request) {
+        return problems.response(request, 503, "SERVICE_UNAVAILABLE", List.of());
     }
 
     @ExceptionHandler(PlanValidationException.class)

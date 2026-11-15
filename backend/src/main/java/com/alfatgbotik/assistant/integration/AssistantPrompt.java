@@ -12,7 +12,7 @@ import java.util.Map;
 @Component
 public class AssistantPrompt {
 
-    public static final String VERSION = "consultation-v1";
+    public static final String VERSION = "consultation-v2-actions-1";
     public static final int CONTEXT_TOKENS = 16384;
     public static final int OUTPUT_TOKENS = 1200;
     private final JsonMapper json;
@@ -22,8 +22,16 @@ public class AssistantPrompt {
 
     public AssistantPrompt(JsonMapper json) throws IOException {
         this.json = json;
-        instructions = new ClassPathResource("assistant/prompts/consultation-v1.txt").getContentAsString(StandardCharsets.UTF_8);
-        schemaText = new ClassPathResource("assistant/response-schema.json").getContentAsString(StandardCharsets.UTF_8);
+        instructions = new ClassPathResource("assistant/prompts/consultation-v2.txt").getContentAsString(StandardCharsets.UTF_8);
+        var full = (tools.jackson.databind.node.ObjectNode) json.readTree(
+                new ClassPathResource("assistant/response-schema.json").getContentAsString(StandardCharsets.UTF_8));
+        var properties = (tools.jackson.databind.node.ObjectNode) full.get("properties");
+        ((tools.jackson.databind.node.ObjectNode) properties.get("status")).set("enum", json.valueToTree(java.util.List.of("ANSWER", "CLARIFY", "NOT_FOUND")));
+        properties.set("profilePatch", json.readTree("{\"type\":\"object\",\"additionalProperties\":false}"));
+        properties.set("planProposal", json.readTree("{\"type\":\"null\"}"));
+        properties.set("reminderProposal", json.readTree("{\"type\":\"null\"}"));
+        full.remove("$defs");
+        schemaText = json.writeValueAsString(full);
         schema = json.readValue(schemaText, Map.class);
     }
 

@@ -48,6 +48,11 @@ public class PlanService {
     }
 
     @Transactional(readOnly = true)
+    public void checkGeneration(UUID userId, PlanReplacement replacement) {
+        checkReplacement(plans.findCurrentHeader(userId).orElse(null), replacement);
+    }
+
+    @Transactional(readOnly = true)
     public void requireReminderStep(UUID userId, UUID stepId, UUID materialId) {
         if (!plans.ownsStep(userId, stepId)) {
             throw new PlanNotFoundException();

@@ -5,6 +5,7 @@ import com.alfatgbotik.telegram.model.TelegramReply;
 import com.alfatgbotik.telegram.model.TelegramUpdateStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -18,9 +19,11 @@ import java.util.UUID;
 public class TelegramUpdateRepository {
 
     private final JdbcTemplate jdbc;
+    private final JsonMapper json;
 
-    public TelegramUpdateRepository(JdbcTemplate jdbc) {
+    public TelegramUpdateRepository(JdbcTemplate jdbc, JsonMapper json) {
         this.jdbc = jdbc;
+        this.json = json;
     }
 
     public boolean insertIfAbsent(UUID id, long botId, int updateId, Instant now) {
@@ -40,10 +43,10 @@ public class TelegramUpdateRepository {
     public void saveReply(UUID id, TelegramReply reply, Instant now) {
         jdbc.update("""
                 UPDATE app.telegram_updates SET status = ?, chat_id = ?, response_text = ?, help_button = ?,
-                    callback_query_id = ?, callback_text = ?, processed_at = ?, updated_at = ?
+                    callback_query_id = ?, callback_text = ?, reply_buttons = ?::jsonb, processed_at = ?, updated_at = ?
                 WHERE id = ? AND status = 'PROCESSING'
                 """, reply.isEmpty() ? "IGNORED" : "PENDING", reply.chatId(), reply.text(), reply.helpButton(),
-                reply.callbackQueryId(), reply.callbackText(), Timestamp.from(now), Timestamp.from(now), id);
+                reply.callbackQueryId(), reply.callbackText(), json.writeValueAsString(reply.buttons()), Timestamp.from(now), Timestamp.from(now), id);
     }
 
     public Optional<StoredTelegramUpdate> claim(UUID id, Instant now) {
@@ -77,7 +80,8 @@ public class TelegramUpdateRepository {
 
     private StoredTelegramUpdate map(ResultSet row, int rowNumber) throws SQLException {
         TelegramReply reply = new TelegramReply(row.getObject("chat_id", Long.class), row.getString("response_text"),
-                row.getBoolean("help_button"), row.getString("callback_query_id"), row.getString("callback_text"));
+                row.getBoolean("help_button"), row.getString("callback_query_id"), row.getString("callback_text"),
+                List.of(json.readValue(row.getString("reply_buttons"), TelegramReply.Button[].class)));
         return new StoredTelegramUpdate(row.getObject("id", UUID.class), row.getLong("bot_id"), row.getInt("update_id"),
                 reply, TelegramUpdateStatus.valueOf(row.getString("status")), row.getInt("attempts"),
                 row.getTimestamp("next_attempt_at").toInstant());

@@ -4,6 +4,8 @@ import com.alfatgbotik.common.api.JsonRequest;
 import com.alfatgbotik.common.error.RequestValidationException;
 import com.alfatgbotik.identity.model.AuthenticatedSession;
 import com.alfatgbotik.plan.service.PlanService;
+import com.alfatgbotik.plan.service.PlanGenerationService;
+import com.alfatgbotik.reminder.api.ReminderRequests;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -24,10 +27,19 @@ public class PlanController {
 
     private final PlanService plans;
     private final JsonMapper json;
+    private final PlanGenerationService generation;
 
-    public PlanController(PlanService plans, JsonMapper json) {
+    public PlanController(PlanService plans, JsonMapper json, PlanGenerationService generation) {
         this.plans = plans;
         this.json = json;
+        this.generation = generation;
+    }
+
+    @PostMapping("/generate")
+    public PlanDto generate(@AuthenticationPrincipal AuthenticatedSession session,
+                             @RequestHeader(name = "Idempotency-Key", required = false) String key,
+                             @RequestBody(required = false) JsonNode body) {
+        return generation.generate(session.userId(), ReminderRequests.uuid(key, "Idempotency-Key"), body);
     }
 
     @GetMapping("/current")

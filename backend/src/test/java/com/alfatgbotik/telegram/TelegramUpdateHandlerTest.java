@@ -25,7 +25,7 @@ class TelegramUpdateHandlerTest {
 
     private final UserService users = mock(UserService.class);
     private final ConversationService conversations = mock(ConversationService.class);
-    private final TelegramUpdateHandler handler = new TelegramUpdateHandler(users, conversations);
+    private final TelegramUpdateHandler handler = new TelegramUpdateHandler(users, conversations, mock(TelegramActions.class));
 
     @Test
     void registersPrivateChatAndPreparesWelcome() {

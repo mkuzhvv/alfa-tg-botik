@@ -44,8 +44,8 @@ public class TelegramConfiguration {
     }
 
     @Bean
-    public TelegramUpdateHandler telegramUpdateHandler(UserService users, ConversationService conversations) {
-        return new TelegramUpdateHandler(users, conversations);
+    public TelegramUpdateHandler telegramUpdateHandler(UserService users, ConversationService conversations, TelegramActions actions) {
+        return new TelegramUpdateHandler(users, conversations, actions);
     }
 
     @Bean

@@ -41,14 +41,26 @@ public class TelegramUpdateProcessor {
 
     public void process(long botId, Update update) {
         boolean consultation = handler.isConsultation(update);
-        StoredTelegramUpdate stored = transactions.execute(transaction -> {
-            Instant now = clock.instant();
-            UUID id = UUID.randomUUID();
-            if (updates.insertIfAbsent(id, botId, update.getUpdateId(), now) && !consultation) {
-                updates.saveReply(id, handler.prepare(update, id), clock.instant());
-            }
-            return updates.find(botId, update.getUpdateId());
-        });
+        StoredTelegramUpdate stored;
+        try {
+            stored = transactions.execute(transaction -> {
+                Instant now = clock.instant();
+                UUID id = UUID.randomUUID();
+                if (updates.insertIfAbsent(id, botId, update.getUpdateId(), now) && !consultation) {
+                    updates.saveReply(id, handler.prepare(update, id), clock.instant());
+                }
+                return updates.find(botId, update.getUpdateId());
+            });
+        } catch (RuntimeException failure) {
+            TelegramReply rejection = handler.rejection(update, failure);
+            stored = transactions.execute(transaction -> {
+                UUID id = UUID.randomUUID();
+                if (updates.insertIfAbsent(id, botId, update.getUpdateId(), clock.instant())) {
+                    updates.saveReply(id, rejection, clock.instant());
+                }
+                return updates.find(botId, update.getUpdateId());
+            });
+        }
         if (consultation && stored.status() == TelegramUpdateStatus.PROCESSING) {
             TelegramReply reply = handler.prepare(update, stored.id());
             UUID id = stored.id();

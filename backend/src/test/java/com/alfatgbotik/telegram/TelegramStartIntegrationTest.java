@@ -69,7 +69,7 @@ class TelegramStartIntegrationTest {
     @BeforeEach
     void configureProcessor() {
         when(clock.instant()).thenReturn(now);
-        handler = spy(new TelegramUpdateHandler(users, mock(com.alfatgbotik.assistant.service.ConversationService.class)));
+        handler = spy(new TelegramUpdateHandler(users, mock(com.alfatgbotik.assistant.service.ConversationService.class), mock(TelegramActions.class)));
         processor = newProcessor();
     }
 

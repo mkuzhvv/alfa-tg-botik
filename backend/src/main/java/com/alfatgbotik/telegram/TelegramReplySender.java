@@ -40,7 +40,7 @@ public class TelegramReplySender {
         }
         try {
             telegramClient.execute(SendMessage.builder().chatId(reply.chatId().toString()).text(reply.text())
-                    .replyMarkup(reply.helpButton() ? helpKeyboard() : null).build());
+                    .replyMarkup(!reply.buttons().isEmpty() ? keyboard(reply.buttons()) : reply.helpButton() ? helpKeyboard() : null).build());
             return TelegramDeliveryResult.delivered();
         } catch (TelegramApiRequestException exception) {
             return rejection(exception);
@@ -67,5 +67,10 @@ public class TelegramReplySender {
         InlineKeyboardButton button = InlineKeyboardButton.builder()
                 .text("Помощь").callbackData(TelegramReply.HELP_ACTION).build();
         return InlineKeyboardMarkup.builder().keyboard(List.of(new InlineKeyboardRow(button))).build();
+    }
+
+    private InlineKeyboardMarkup keyboard(List<TelegramReply.Button> buttons) {
+        return InlineKeyboardMarkup.builder().keyboard(buttons.stream().map(button -> new InlineKeyboardRow(
+                InlineKeyboardButton.builder().text(button.text()).callbackData(button.callbackData()).url(button.url()).build())).toList()).build();
     }
 }

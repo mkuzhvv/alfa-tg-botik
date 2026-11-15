@@ -25,23 +25,30 @@ public class TelegramUpdateHandler {
             Доступные команды:
             /start — начать работу;
             /help — показать эту справку.
+            /profile — посмотреть профиль бизнеса;
+            /plan — текущий план и отметки выполнения;
+            /reminders — напоминания, пауза и отмена.
 
             Под приветствием есть кнопка «Помощь» — она открывает ту же справку.
             Для консультации просто отправь вопрос текстом, до 4000 символов.
             Я учитываю последние сообщения диалога. Подготовка ответа может занять до минуты.
-            Сохранение планов и управление напоминаниями из переписки ещё не подключены.
+            Примеры: «У меня кофейня. Я новичок», «Составь план привлечения клиентов»,
+            «Напомни завтра в 9 по Москве о втором шаге».
+            План и напоминание сохраняются после подтверждения кнопкой. Замена плана требует отдельного согласия.
             """;
     private static final String UNKNOWN_COMMAND_MESSAGE =
-            "Неизвестная команда. Доступные команды: /start и /help.";
+            "Неизвестная команда. Доступны /start, /help, /profile, /plan и /reminders.";
     private static final String UNSUPPORTED_MESSAGE =
             "Этот тип сообщения пока не поддерживается. Пришли текст или воспользуйся /help.";
 
     private final UserService users;
     private final ConversationService conversations;
+    private final TelegramActions actions;
 
-    public TelegramUpdateHandler(UserService users, ConversationService conversations) {
+    public TelegramUpdateHandler(UserService users, ConversationService conversations, TelegramActions actions) {
         this.users = users;
         this.conversations = conversations;
+        this.actions = actions;
     }
 
     public TelegramReply prepare(Update update, UUID requestId) {
@@ -67,6 +74,11 @@ public class TelegramUpdateHandler {
         conversations.recoverInterrupted();
     }
 
+    public TelegramReply rejection(Update update, RuntimeException failure) {
+        if (!update.hasCallbackQuery()) throw failure;
+        return actions.rejection(update.getCallbackQuery().getId(), failure);
+    }
+
     private TelegramReply prepareMessage(Message message, UUID requestId) {
         User sender = message.getFrom();
         if (!isPrivateChat(message.getChat()) || !isHuman(sender)) {
@@ -80,6 +92,9 @@ public class TelegramUpdateHandler {
         return switch (command) {
             case "/start" -> prepareStart(message);
             case "/help" -> TelegramReply.message(message.getChatId(), HELP_MESSAGE, false);
+            case "/profile" -> actions.profile(currentUser(message.getFrom()), message.getChatId());
+            case "/plan" -> actions.plan(currentUser(message.getFrom()), message.getChatId());
+            case "/reminders" -> actions.reminders(currentUser(message.getFrom()), message.getChatId());
             default -> text.startsWith("/") ? TelegramReply.message(message.getChatId(), UNKNOWN_COMMAND_MESSAGE, false)
                     : prepareConsultation(message, requestId);
         };
@@ -97,8 +112,11 @@ public class TelegramUpdateHandler {
             return TelegramReply.message(message.getChatId(), "Напиши непустой вопрос длиной до 4000 символов.", false);
         }
         var user = users.getOrCreate(message.getFrom().getId(), displayName(message.getFrom()));
-        return TelegramReply.message(message.getChatId(), conversations.consult(user.id(), requestId, text), false);
+        return TelegramReply.message(message.getChatId(), conversations.consult(user.id(), requestId, text), false)
+                .withButtons(actions.proposalButtons(user.id(), requestId));
     }
+
+    private UUID currentUser(User sender) { return users.getOrCreate(sender.getId(), displayName(sender)).id(); }
 
     private String displayName(User sender) {
         String displayName = Stream.of(sender.getFirstName(), sender.getLastName())
@@ -114,6 +132,10 @@ public class TelegramUpdateHandler {
         }
         if (callback.getMessage() == null || !isPrivateChat(callback.getMessage().getChat())) {
             return TelegramReply.callback(callback.getId(), "Открой личный чат с ботом и отправь /help.", null, null);
+        }
+        if (!TelegramReply.HELP_ACTION.equals(callback.getData()) && callback.getData() != null
+                && callback.getData().matches("(?:ac|ar|ax|sd|st|pa|rp|rr|rx):.*")) {
+            return actions.callback(currentUser(callback.getFrom()), callback.getMessage().getChatId(), callback.getId(), callback.getData());
         }
         if (!TelegramReply.HELP_ACTION.equals(callback.getData())) {
             return TelegramReply.callback(callback.getId(), "Эта кнопка больше не поддерживается. Отправь /help.", null, null);

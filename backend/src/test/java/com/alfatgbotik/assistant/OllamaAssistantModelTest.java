@@ -3,6 +3,7 @@ package com.alfatgbotik.assistant;
 import com.alfatgbotik.assistant.integration.AssistantPrompt;
 import com.alfatgbotik.assistant.integration.LocalOllama;
 import com.alfatgbotik.assistant.integration.OllamaAssistantModel;
+import com.alfatgbotik.assistant.integration.OllamaChatGateway;
 import com.alfatgbotik.assistant.model.AssistantContext;
 import com.alfatgbotik.assistant.model.ConsultationDeadline;
 import com.alfatgbotik.assistant.service.AssistantFailure;
@@ -70,8 +71,8 @@ class OllamaAssistantModelTest {
     }
 
     private OllamaAssistantModel model(HttpServer server, String revision) throws Exception {
-        return new OllamaAssistantModel(new LocalOllama("http://127.0.0.1:" + server.getAddress().getPort()),
-                new AssistantPrompt(json), "qwen3.5:9b-q4_K_M", revision);
+        return new OllamaAssistantModel(new OllamaChatGateway(new LocalOllama("http://127.0.0.1:" + server.getAddress().getPort()),
+                json, "qwen3.5:9b-q4_K_M", revision), new AssistantPrompt(json));
     }
 
     private HttpServer server(AtomicReference<JsonNode> received, AtomicInteger calls, int status) throws Exception {

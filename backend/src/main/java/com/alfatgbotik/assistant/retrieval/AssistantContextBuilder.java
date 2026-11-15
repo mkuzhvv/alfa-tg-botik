@@ -45,9 +45,30 @@ public class AssistantContextBuilder {
     }
 
     public PreparedContext prepare(UUID userId, String message) {
-        var profile = users.getById(userId).profile();
-        List<HistoryMessage> history = new ArrayList<>(conversations.history(userId));
+        return prepare(base(userId, message));
+    }
+
+    public PreparedContext base(UUID userId, String message) {
+        var user = users.getById(userId);
+        var plan = plans.getCurrent(userId);
+        AssistantContext.CurrentPlan currentPlan = plan == null ? null : new AssistantContext.CurrentPlan(plan.id(),
+                plan.goal(), plan.status().name(), plan.version(), plan.steps().stream().map(step -> new AssistantContext.Step(
+                step.id(), step.position(), step.title(), step.description(), step.status().name(),
+                step.materials().stream().map(this::material).toList())).toList(), plan.createdAt(), plan.updatedAt());
+        return new PreparedContext(new AssistantContext("0.1.0", clock.instant(), message, user.profile(),
+                conversations.history(userId), List.of(), List.of(), currentPlan), null, user.profileVersion());
+    }
+
+    public PreparedContext prepare(PreparedContext base) {
+        String message = base.context().message();
+        var profile = base.context().profile();
+        List<HistoryMessage> history = new ArrayList<>(base.context().history());
         String query = message;
+        if (base.context().currentPlan() != null && message.matches("(?isuU).*(?:что.*дальше|следующ.*шаг).*")) {
+            var plan = base.context().currentPlan();
+            query = plan.goal() + "\n" + plan.steps().stream().filter(step -> step.status().equals("TODO"))
+                    .findFirst().map(AssistantContext.Step::title).orElse("");
+        }
         if (message.codePointCount(0, message.length()) < 100
                 && message.matches("(?isuU)^(а\\b|и\\b|как это\\b|что это\\b|почему так\\b|подробнее\\b|расскажи подробнее\\b|можно подробнее\\b).*")) {
             String previous = history.stream().filter(item -> item.role().equals("USER"))
@@ -76,11 +97,7 @@ public class AssistantContextBuilder {
         List<Material> catalog = materialIds.stream().flatMap(id -> cards.stream().filter(card -> card.id().equals(id)))
                 .map(card -> new Material(card.id(), card.title(), card.kind(), shortDescription(card.description()),
                         card.isPaid(), card.duration(), card.url())).toList();
-        var plan = plans.getCurrent(userId);
-        AssistantContext.CurrentPlan currentPlan = plan == null ? null : new AssistantContext.CurrentPlan(plan.id(),
-                plan.goal(), plan.status().name(), plan.version(), plan.steps().stream().map(step -> new AssistantContext.Step(
-                step.id(), step.position(), step.title(), step.description(), step.status().name(),
-                step.materials().stream().map(this::material).toList())).toList(), plan.createdAt(), plan.updatedAt());
+        var currentPlan = base.context().currentPlan();
         AssistantContext context;
         while (true) {
             context = new AssistantContext("0.1.0", clock.instant(), message, profile, List.copyOf(history),
@@ -99,7 +116,7 @@ public class AssistantContextBuilder {
                 throw new AssistantFailure("CONTEXT_TOO_LARGE");
             }
         }
-        return new PreparedContext(context, version);
+        return new PreparedContext(context, version, base.profileVersion());
     }
 
     private Material material(MaterialCardDto card) {
@@ -150,6 +167,6 @@ public class AssistantContextBuilder {
         return text.substring(bestStart, end);
     }
 
-    public record PreparedContext(AssistantContext context, String datasetVersion) {
+    public record PreparedContext(AssistantContext context, String datasetVersion, long profileVersion) {
     }
 }

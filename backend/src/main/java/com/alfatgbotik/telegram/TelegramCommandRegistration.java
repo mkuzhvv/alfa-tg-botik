@@ -28,7 +28,10 @@ public class TelegramCommandRegistration implements ApplicationRunner {
         try {
             Boolean registered = telegramClient.execute(SetMyCommands.builder().commands(List.of(
                     BotCommand.builder().command("start").description("Начать работу").build(),
-                    BotCommand.builder().command("help").description("Показать помощь").build()
+                    BotCommand.builder().command("help").description("Показать помощь").build(),
+                    BotCommand.builder().command("profile").description("Профиль бизнеса").build(),
+                    BotCommand.builder().command("plan").description("План и прогресс").build(),
+                    BotCommand.builder().command("reminders").description("Управление напоминаниями").build()
             )).build());
             if (!Boolean.TRUE.equals(registered)) {
                 throw new IllegalStateException("Telegram command registration was not confirmed");

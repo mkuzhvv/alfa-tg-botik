@@ -130,7 +130,7 @@ public class AssistantResponseValidator {
     private void validateReminder(JsonNode node, AssistantContext context, Set<UUID> materials) {
         var command = ReminderRequests.create(node);
         command.schedule().requireFuture(context.now());
-        String zone = context.profile().timeZone();
+        String zone = ReminderInterpreter.confirmedZone(context);
         if (zone == null || !zone.equals(command.schedule().timeZone())) {
             throw invalid();
         }

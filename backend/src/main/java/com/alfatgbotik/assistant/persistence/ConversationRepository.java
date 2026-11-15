@@ -45,7 +45,7 @@ public class ConversationRepository {
         List<List<HistoryMessage>> turns = jdbc.query("""
                 SELECT t.user_text, t.assistant_text FROM app.conversation_turns t
                 JOIN app.conversations c ON c.id = t.conversation_id
-                WHERE c.user_id = ? AND t.status = 'COMPLETED' ORDER BY t.position DESC LIMIT 2
+                WHERE c.user_id = ? AND t.status = 'COMPLETED' ORDER BY t.position DESC LIMIT 6
                 """, (row, number) -> List.of(new HistoryMessage("USER", row.getString("user_text")),
                 new HistoryMessage("ASSISTANT", row.getString("assistant_text"))), userId);
         Collections.reverse(turns);

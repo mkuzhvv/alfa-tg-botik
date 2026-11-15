@@ -75,6 +75,7 @@ class ConversationIntegrationTest {
     private static final UUID CHUNK = UUID.randomUUID();
     private static final UUID PAID_CHUNK = UUID.randomUUID();
 
+    @Autowired org.springframework.context.ApplicationContext context;
     @Autowired ConversationService conversations;
     @Autowired ConversationRepository repository;
     @Autowired UserService users;
@@ -160,7 +161,7 @@ class ConversationIntegrationTest {
     }
 
     @Test
-    void repeatsCompletedRequestWithoutCallingModelAndKeepsAtMostFourHistoryMessages() {
+    void repeatsCompletedRequestWithoutCallingModelAndKeepsBoundedHistoryMessages() {
         UUID id = UUID.randomUUID();
         String first = conversations.consult(owner, id, "Первый вопрос");
         assertThat(conversations.consult(owner, id, "Первый вопрос")).isEqualTo(first);
@@ -168,8 +169,8 @@ class ConversationIntegrationTest {
         conversations.consult(owner, UUID.randomUUID(), "Второй вопрос");
         conversations.consult(owner, UUID.randomUUID(), "Третий вопрос");
         var history = repository.history(owner);
-        assertThat(history).hasSize(4);
-        assertThat(history.getFirst().text()).isEqualTo("Второй вопрос");
+        assertThat(history).hasSize(6);
+        assertThat(history.getFirst().text()).isEqualTo("Первый вопрос");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM app.conversation_turns", Long.class)).isEqualTo(3);
     }
 
@@ -257,7 +258,7 @@ class ConversationIntegrationTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return new Message();
         });
-        var handler = new TelegramUpdateHandler(users, conversations);
+        var handler = new TelegramUpdateHandler(users, conversations, context.getBean(com.alfatgbotik.telegram.TelegramActions.class));
         var processor = new TelegramUpdateProcessor(telegramUpdates, handler, new TelegramReplySender(client), manager, Clock.systemUTC());
         Update update = new Update();
         update.setUpdateId(100);
@@ -294,7 +295,7 @@ class ConversationIntegrationTest {
             var normal = response(context);
             return new AssistantModel.ModelReply(normal.text().replace("\"profilePatch\":{}", "\"profilePatch\":{\"industry\":\"кофейня\"}"), "test", "a".repeat(64));
         });
-        assertThat(conversations.consult(owner, UUID.randomUUID(), "Вопрос по плану")).contains("не сохранены");
+        assertThat(conversations.consult(owner, UUID.randomUUID(), "Вопрос по плану")).contains("не удалось получить ответ");
         assertThat(users.getById(owner).profile().industry()).isNull();
         assertThat(users.getById(owner).profileVersion()).isZero();
     }

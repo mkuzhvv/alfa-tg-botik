@@ -4,7 +4,7 @@
   "required": ["schemaVersion", "status", "answer", "sourceChunkIds", "recommendations", "profilePatch", "planProposal", "reminderProposal"],
   "properties": {
     "schemaVersion": {"type": "string", "const": "0.1.0"},
-    "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND"]},
+    "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND", "ACTION_PROPOSAL"]},
     "answer": {"type": "string", "minLength": 1, "maxLength": 2500},
     "sourceChunkIds": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}},
     "recommendations": {
@@ -17,8 +17,39 @@
         }
       }
     },
-    "profilePatch": {"type": "object", "additionalProperties": false},
-    "planProposal": {"type": "null"},
-    "reminderProposal": {"type": "null"}
+    "profilePatch": {"type": "object", "additionalProperties": false, "properties": {
+      "industry": {"type": ["string", "null"], "minLength": 1, "maxLength": 100},
+      "currentTask": {"type": ["string", "null"], "minLength": 1, "maxLength": 500},
+      "timeZone": {"type": ["string", "null"], "maxLength": 64},
+      "businessStage": {"enum": ["IDEA", "LAUNCH", "OPERATING", "GROWTH", null]},
+      "experience": {"enum": ["BEGINNER", "EXPERIENCED", null]},
+      "taxRegime": {"enum": ["NPD", "USN_6", "USN_15", "PATENT", "OSNO", "AUSN", null]}
+    }},
+    "planProposal": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false,
+      "required": ["goal", "steps"], "properties": {"goal": {"type": "string", "minLength": 1, "maxLength": 250},
+      "steps": {"type": "array", "minItems": 3, "maxItems": 5, "items": {"type": "object", "additionalProperties": false,
+        "required": ["title", "description", "materialIds"], "properties": {
+          "title": {"type": "string", "minLength": 1, "maxLength": 160},
+          "description": {"type": "string", "minLength": 1, "maxLength": 600},
+          "materialIds": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}}
+        }}}}}]},
+    "reminderProposal": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false,
+      "required": ["title", "schedule", "materialId", "planStepId"], "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "materialId": {"type": ["string", "null"], "format": "uuid"},
+        "planStepId": {"type": ["string", "null"], "format": "uuid"},
+        "schedule": {"oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["type", "at", "timeZone"], "properties": {
+            "type": {"const": "ONCE"}, "at": {"type": "string", "format": "date-time"}, "timeZone": {"type": "string"}}},
+          {"type": "object", "additionalProperties": false, "required": ["type", "localTime", "startDate", "timeZone"], "properties": {
+            "type": {"const": "DAILY"}, "localTime": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}, "startDate": {"type": "string", "format": "date"}, "timeZone": {"type": "string"}}},
+          {"type": "object", "additionalProperties": false, "required": ["type", "localTime", "startDate", "timeZone", "dayOfWeek"], "properties": {
+            "type": {"const": "WEEKLY"}, "localTime": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}, "startDate": {"type": "string", "format": "date"}, "timeZone": {"type": "string"},
+            "dayOfWeek": {"enum": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]}}},
+          {"type": "object", "additionalProperties": false, "required": ["type", "localTime", "startDate", "timeZone", "dayOfMonth"], "properties": {
+            "type": {"const": "MONTHLY"}, "localTime": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}, "startDate": {"type": "string", "format": "date"}, "timeZone": {"type": "string"},
+            "dayOfMonth": {"type": "integer", "minimum": 1, "maximum": 31}}}
+        ]}
+      }}]}
   }
 }
