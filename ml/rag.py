@@ -748,6 +748,8 @@ def main():
     for command in [answer, chat]:
         command.add_argument("--answer-mode", choices=["generative", "evidence", "extracts"], default="extracts")
         command.add_argument("--compression", choices=["none", "window"], default="none")
+        command.add_argument("--now", help="Серверное время UTC для воспроизводимой проверки, например 2026-11-15T10:00:00Z")
+    answer.add_argument("--operation", choices=["consultation", "generate_plan"], default="consultation")
     args = parser.parse_args()
     if args.command == "import-backup":
         from import_backup import import_backup
@@ -755,7 +757,7 @@ def main():
     elif args.command == "chat":
         from local_chat import chat
         chat(args.dataset, args.chat_model, args.context, args.min_score, args.timeout,
-             args.strategy, args.max_per_material, args.rerank, args.answer_mode, args.compression)
+             args.strategy, args.max_per_material, args.rerank, args.answer_mode, args.compression, args.now)
     elif args.command == "export":
         output = args.output.resolve()
         if not output.is_relative_to((ROOT / "data/source").resolve()):
@@ -784,7 +786,7 @@ def main():
                 result = retriever.retrieve(args.query, args.limit, args.min_score)
             elif args.command == "ask":
                 result = ask(retriever, args.question, client, args.chat_model, load_context(args.context), args.min_score, args.timeout,
-                             args.answer_mode, args.compression)
+                             args.answer_mode, args.compression, args.now, args.operation)
             else:
                 result = evaluate_search(retriever, args.cases, args.limit, args.min_score)
         print(json.dumps(result, ensure_ascii=False, indent=2))

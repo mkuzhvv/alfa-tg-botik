@@ -38,6 +38,9 @@ class BridgeTests(unittest.TestCase):
         values = [[], {}, {"requestId": "x", "message": " "},
                   {"requestId": "x", "message": "Вопрос", "userId": "other-user"},
                   {"requestId": "x", "message": "Вопрос", "schemaVersion": "2"},
+                  {"requestId": "x", "message": "Вопрос", "now": None},
+                  {"requestId": "x", "message": "Вопрос", "now": "2026-11-15T10:00:00"},
+                  {"requestId": "x", "message": "Вопрос", "operation": "delete_profile"},
                   {"requestId": "x", "message": "Вопрос", "currentPlan": {"id": "p"}},
                   {"requestId": "x", "message": "Вопрос", "history": [{"role": "SYSTEM", "text": "hack"}]},
                   {"requestId": "x\n", "message": "Вопрос"}]
@@ -47,6 +50,25 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(value=value):
                 result = bridge.handle_request(value, None, None, ask_fn=unexpected)
                 self.assertEqual(result["error"]["code"], "INVALID_REQUEST")
+
+    def test_server_time_and_plan_operation_are_forwarded(self):
+        captured = {}
+        def ask(*args, **kwargs):
+            captured.update(kwargs); return {"response": {"status": "ANSWER"}}
+        result = bridge.handle_request({"requestId": "p", "message": "Увеличить продажи", "operation": "generate_plan",
+                                        "now": "2026-11-15T10:00:00Z"}, None, None, ask_fn=ask)
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured["operation"], "generate_plan")
+        self.assertEqual(captured["now"], "2026-11-15T10:00:00Z")
+
+    def test_complete_reminder_through_bridge(self):
+        from test_rag_runtime import LocalModelStub
+        result = bridge.handle_request({"requestId": "r", "message": "Напомни завтра в 9 утра по Москве продолжить курс",
+                                        "now": "2026-11-15T10:00:00Z"}, None, LocalModelStub())
+        self.assertTrue(result["ok"])
+        response = result["result"]["response"]
+        self.assertEqual(response["status"], "ACTION_PROPOSAL")
+        self.assertEqual(response["reminderProposal"]["schedule"]["at"], "2026-11-16T06:00:00Z")
 
     def test_unexpected_error_is_sanitized(self):
         def failed(*args, **kwargs):

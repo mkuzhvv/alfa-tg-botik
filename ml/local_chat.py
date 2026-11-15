@@ -1,10 +1,11 @@
 """Терминальный стенд: история живёт только до завершения процесса."""
+import json
 
 from rag_runtime import Ollama, RagError, Retriever, ask, load_context
 
 
 def chat(dataset, model, context_path=None, min_score=0.35, timeout=60,
-         strategy="hybrid_dense", max_per_material=2, rerank=False, answer_mode="extracts", compression="none"):
+         strategy="hybrid_dense", max_per_material=2, rerank=False, answer_mode="extracts", compression="none", now=None):
     client = Ollama()
     retriever = Retriever(dataset, client)
     retriever.strategy, retriever.max_per_material, retriever.llm_rerank = strategy, max_per_material, rerank
@@ -33,13 +34,16 @@ def chat(dataset, model, context_path=None, min_score=0.35, timeout=60,
             continue
         print("Ищу материалы и готовлю ответ…", flush=True)
         try:
-            result = ask(retriever, question, client, model, context, min_score, timeout, answer_mode, compression)
+            result = ask(retriever, question, client, model, context, min_score, timeout, answer_mode, compression, now)
         except RagError as error:
             print(f"Техническая ошибка: {error}")
             continue
         last_result = result
         response = result["response"]
         print(f"\n{response['status']}: {response['answer']}")
+        for field in ["profilePatch", "planProposal", "reminderProposal"]:
+            if response[field]:
+                print(field+": "+json.dumps(response[field], ensure_ascii=False, indent=2))
         seen = set()
         for ref in result["references"]:
             if ref["url"] not in seen:

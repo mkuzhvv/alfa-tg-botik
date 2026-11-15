@@ -38,12 +38,19 @@ def request_id(value):
 
 
 def validate_request(value):
-    allowed = {"schemaVersion", "requestId", "message", "profile", "history", "currentPlan"}
+    allowed = {"schemaVersion", "requestId", "message", "profile", "history", "currentPlan", "now", "operation"}
     if not isinstance(value, dict) or set(value)-allowed:
         invalid("Ожидается JSON-объект с полями протокола RAG")
     rid = request_id(value.get("requestId"))
     if value.get("schemaVersion", rag.SCHEMA) != rag.SCHEMA:
         invalid("Не поддерживается schemaVersion")
+    if value.get("operation", "consultation") not in {"consultation", "generate_plan"}:
+        invalid("Неизвестная operation")
+    if "now" in value:
+        from feature_contract import utc_now
+        if not isinstance(value["now"], str):
+            invalid("now должен быть строкой UTC")
+        utc_now(value["now"])
     message = value.get("message")
     if not isinstance(message, str) or not 1 <= len(message.strip()) <= 4000:
         invalid("message должен содержать от 1 до 4000 символов")
@@ -70,7 +77,12 @@ def handle_request(value, retriever, client, model=CHAT_MODEL, timeout=60, ask_f
     except (ValueError, TypeError) as error:
         return error_response(rid, "INVALID_REQUEST", str(error))
     try:
-        result = ask_fn(retriever, message, client, model, context, timeout=timeout)
+        kwargs = {"timeout": timeout}
+        if "now" in value:
+            kwargs["now"] = value["now"]
+        if "operation" in value:
+            kwargs["operation"] = value["operation"]
+        result = ask_fn(retriever, message, client, model, context, **kwargs)
     except (RagError, ValueError, KeyError, OSError):
         # Не отражаем вопрос, профиль, путь и тело ответа модели в ошибке протокола.
         return error_response(rid, "RAG_ERROR", "Не удалось выполнить консультацию. Проверьте локальную Ollama, модели и индекс.")

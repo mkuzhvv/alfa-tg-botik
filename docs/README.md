@@ -12,6 +12,7 @@
 | [Подготовка знаний](contracts/data/README.md) | ML 1 и бэкенд |
 | [Работа с моделью](contracts/llm/README.md) | ML 2 и бэкенд |
 | [Подключение текущего RAG](RAG_BACKEND_INTEGRATION.md) | Бэкенд: запуск, JSONL worker, Java-пример, ограничения Docker и перенос в Spring AI |
+| [Планы, профиль и напоминания](RAG_ACTIONS.md) | ML 2 и бэкенд: profilePatch, planProposal, ACTION_PROPOSAL, now и currentPlan |
 
 Подготовлены запуск Java и PostgreSQL с Flyway, проверка здоровья и внутренние
 сервисы пользователя и бизнес-профиля. На шаге 3.2 добавлены Telegram-клиент,

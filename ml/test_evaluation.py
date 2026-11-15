@@ -23,8 +23,10 @@ class EvidenceAndRoutingTests(unittest.TestCase):
 
     def test_operations_are_not_confused_with_educational_questions(self):
         context = runtime.load_context()
-        for q in ["Напомни мне завтра про курс", "Сохрани мой план", "Отмени напоминание", "Измени мой профиль"]:
+        for q in ["Сохрани мой план", "Отмени напоминание"]:
             self.assertEqual(route_question(q, context)["route"], "unsupported_action")
+        for q in ["Напомни мне завтра про курс", "Измени мой профиль"]:
+            self.assertIsNone(route_question(q, context))
         for q in ["Как создать план обучения?", "Напомни, что такое CRM?", "Зачем нужны напоминания?", "Не сохраняй план, объясни его структуру"]:
             self.assertIsNone(route_question(q, context))
 
@@ -32,9 +34,9 @@ class EvidenceAndRoutingTests(unittest.TestCase):
         client = LocalModelStub()
         result = runtime.ask(None, "Напомни мне завтра про курс", client, answer_mode="evidence")
         self.assertEqual(client.requests, [])
-        self.assertEqual(result["diagnostics"]["route"], "unsupported_action")
+        self.assertEqual(result["diagnostics"]["route"], "reminder_clarify")
         self.assertIsNone(result["response"]["reminderProposal"])
-        self.assertIn("не выполнено", result["response"]["answer"])
+        self.assertIn("часовом поясе", result["response"]["answer"])
 
     def test_direct_context_is_validated(self):
         with self.assertRaises(runtime.RagError):
@@ -54,7 +56,7 @@ class EvidenceAndRoutingTests(unittest.TestCase):
         self.assertIsNone(route_question("Посоветуй платный курс по продажам", context))
         self.assertIsNone(route_question("Покажи полный текст бесплатной статьи", context))
         self.assertIsNone(route_question("Какие контактные данные хранить в CRM?", context))
-        self.assertEqual(route_question("Напомни завтра об обучении и объясни, что такое CRM", context)["route"], "unsupported_action")
+        self.assertIsNone(route_question("Напомни завтра об обучении и объясни, что такое CRM", context))
 
     def test_extract_selection_cannot_invent_or_duplicate_evidence(self):
         text = "Клиентская база хранит контакты и историю покупок клиентов. "*15
@@ -178,13 +180,14 @@ class RetrievalAndEvaluationTests(unittest.TestCase):
             validate_cases([good], retriever)
 
     def test_failures_remain_in_metric_denominators(self):
-        rows = [{"expectedStatus": "ANSWER", "kind": "knowledge", "seconds": 60, "error": "timeout"},
+        rows = [{"expectedStatus": "ANSWER", "kind": "knowledge", "seconds": 60, "error": "timeout", "profilePatchCorrect": False},
                 {"expectedStatus": "ANSWER", "kind": "knowledge", "seconds": 1, "statusCorrect": True,
-                 "retrieval": {"chunkHit@5": True}}]
+                 "profilePatchCorrect": True, "retrieval": {"chunkHit@5": True}}]
         summary = summarize(rows)
         self.assertEqual(summary["statusAccuracy"], .5)
         self.assertEqual(summary["chunkHit@5"], .5)
         self.assertEqual(summary["technicalErrors"], 1)
+        self.assertEqual(summary["profilePatchAccuracy"], .5)
 
     def test_embedding_cache_is_bound_to_weights(self):
         with tempfile.TemporaryDirectory() as tmp:
