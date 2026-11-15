@@ -27,6 +27,8 @@ SELECTION_PROMPT = """Ты помощник предпринимателя по 
 Для «что такое» выбирай определение, для «почему» причины, для «как» действия.
 Не выбирай рекламное вступление вместо ответа. Для нового бизнеса не выбирай
 советы, требующие уже существующих покупателей. Не выбирай пример другой отрасли.
+Если передан currentPlan, учитывай его цель и статусы шагов; не предлагай уже
+выполненное как новый первый шаг. Профиль из входа важнее старых реплик истории.
 Если ответа в выдержках нет: NOT_FOUND, evidenceIds=[], clarification="".
 Если задача неясна: CLARIFY, evidenceIds=[], один вопрос в clarification.
 Для ANSWER clarification="". История не доказывает факты. Действий не выполняй.
@@ -72,7 +74,7 @@ def expand_selection(value, payload):
             "recommendations": value["recommendations"]}
 
 
-def route_question(question, context):
+def route_question(question, context, allow_features=True):
     text = normalize_text(question)
     words = re.findall(r"[a-zа-я0-9]+", text)
     # Information about an operation is not a request to execute it.
@@ -90,9 +92,15 @@ def route_question(question, context):
     if (restricted_text and paywall and request_content) or (private_fields and private_export):
         return {"status": "NOT_FOUND", "answer": "В доступных материалах не нашлось достаточной информации для ответа.", "route": "access_boundary"}
     if not explanatory and (remind_action or (imperative and (object_ or reminder))):
-        return {"status": "CLARIFY", "answer": "В этом локальном стенде изменение профиля, сохранение планов и напоминания ещё не подключены. Действие не выполнено. Какой вопрос по материалам вы хотите разобрать?", "route": "unsupported_action"}
+        from plan_proposals import requested as plan_requested
+        from reminder_proposals import requested as reminder_requested
+        profile_request = re.search(r"профил|сфер|отрасл|опыт|стади|налог\w*\s+режим", text)
+        if allow_features and (plan_requested(question, context) or reminder_requested(question) or profile_request):
+            return None
+        return {"status": "CLARIFY", "answer": "Сохранение, изменение и отмена уже существующих записей выполняются в приложении. Действие здесь не выполнено. Какую задачу вы хотите разобрать?", "route": "unsupported_action"}
     generic = set("помоги помогите помочь подскажи подскажите посоветуй совет нужен нужна хочу мне меня у с со в во на по к и а как что это чего какая какой какие лучше дальше начать сделай сделать делать хорошо больше все улучшить исправить бизнес бизнеса бизнесом бизнесу компания компании проблема проблемы меня возникла пожалуйста надо нужно развить решить".split())
-    explicit_task = context["profile"].get("currentTask")
+    plan = context.get("currentPlan")
+    explicit_task = context["profile"].get("currentTask") or (plan.get("goal") if plan and plan.get("status") == "ACTIVE" else None)
     prior_questions = [h for h in context["history"] if h["role"] == "USER" and h["text"].strip()]
     if words and len(words) <= 12 and set(words) <= generic and not prior_questions and not explicit_task:
         return {"status": "CLARIFY", "answer": "Какую конкретную задачу бизнеса вы хотите решить: запуск, привлечение клиентов, продажи или организацию работы?", "route": "clarify_task"}

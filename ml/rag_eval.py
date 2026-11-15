@@ -57,7 +57,7 @@ def validate_cases(cases, retriever):
         if case["id"] in ids:
             raise ValueError("Повторный ID примера")
         ids.add(case["id"])
-        if case["expectedStatus"] not in {"ANSWER", "CLARIFY", "NOT_FOUND"}:
+        if case["expectedStatus"] not in {"ANSWER", "CLARIFY", "NOT_FOUND", "ACTION_PROPOSAL"}:
             raise ValueError("Неизвестный эталонный статус")
         if case["split"] not in {"dev", "test"}:
             raise ValueError("Неизвестная часть набора")
@@ -138,6 +138,11 @@ def summarize(rows):
         concepts = [r["conceptCoverageProxy"] for r in successful if "conceptCoverageProxy" in r]
         result["conceptCoverageProxy"] = statistics.mean(concepts) if concepts else None
         result["conceptCoverageNote"] = "Lexical proxy, not factual correctness or faithfulness."
+        for row_key, summary_key in [("profilePatchCorrect", "profilePatchAccuracy"),
+                                     ("scheduleCorrect", "scheduleAccuracy"), ("planCorrect", "planStructureAccuracy")]:
+            checked = [r for r in generated if row_key in r]
+            if checked:
+                result[summary_key] = sum(r[row_key] for r in checked)/len(checked)
         actions = [r for r in generated if r["kind"] == "action"]
         if actions:
             result["unsupportedActionsHandledHonestly"] = sum(
@@ -191,7 +196,7 @@ def main():
         cases = cases[:args.limit]
     runtime_path = args.runtime or Path(runtime.__file__)
     dependencies = [Path(__file__), Path(rag.__file__)]
-    dependencies += [Path(__file__).parent/name for name in ["answer_policy.py", "lexical.py", "token_budget.py", "context_selection.py", "rerank.py", "calculation.py", "requirements.txt"]]
+    dependencies += [Path(__file__).parent/name for name in ["answer_policy.py", "lexical.py", "token_budget.py", "context_selection.py", "rerank.py", "calculation.py", "feature_contract.py", "profile_updates.py", "plan_proposals.py", "reminder_proposals.py", "requirements.txt"]]
     config = {"mode": args.mode, "strategy": args.strategy, "minScore": args.min_score,
               "answerMode": args.answer_mode,
               "compression": args.compression,
@@ -216,6 +221,9 @@ def main():
         started = time.monotonic()
         row = {"id": case["id"], "group": case["group"], "question": case["question"],
                "kind": case["kind"], "expectedStatus": case["expectedStatus"]}
+        for expected, metric in [("expectedProfilePatch", "profilePatchCorrect"), ("expectedSchedule", "scheduleCorrect"), ("expectedSteps", "planCorrect")]:
+            if expected in case:
+                row[metric] = False
         if args.oracle:
             def oracle_retrieve(query, limit=5, min_score=.45, example=case):
                 sources = []
@@ -232,10 +240,22 @@ def main():
                 if "answer_mode" in inspect.signature(runtime.ask).parameters:
                     kwargs["answer_mode"] = args.answer_mode
                     kwargs["compression"] = args.compression
+                for name in ["now", "operation"]:
+                    if name in case and name in inspect.signature(runtime.ask).parameters:
+                        kwargs[name] = case[name]
                 result = runtime.ask(retriever, case["question"], client, **kwargs)
                 row["result"] = result
                 row["statusCorrect"] = result["response"]["status"] == case["expectedStatus"]
+                if "expectedProfilePatch" in case:
+                    row["profilePatchCorrect"] = result["response"]["profilePatch"] == case["expectedProfilePatch"]
+                if "expectedSchedule" in case:
+                    row["scheduleCorrect"] = (result["response"].get("reminderProposal") or {}).get("schedule") == case["expectedSchedule"]
+                if "expectedSteps" in case:
+                    plan = result["response"].get("planProposal")
+                    row["planCorrect"] = bool(plan and len(plan["steps"]) == case["expectedSteps"])
                 text = result["response"]["answer"].casefold()
+                if result["response"].get("planProposal"):
+                    text += " "+" ".join(s["title"]+" "+s["description"] for s in result["response"]["planProposal"]["steps"]).casefold()
                 concepts = case["requiredConcepts"]
                 if concepts:
                     row["conceptCoverageProxy"] = sum(c.casefold() in text for c in concepts)/len(concepts)

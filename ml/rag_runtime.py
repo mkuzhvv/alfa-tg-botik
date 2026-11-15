@@ -4,6 +4,7 @@ from array import array
 from datetime import datetime, timezone
 import json
 import math
+import re
 from pathlib import Path
 import sqlite3
 import sys
@@ -19,7 +20,7 @@ EMBED_MODEL = "embeddinggemma:300m"
 CHAT_MODEL = "qwen3.5:9b-q4_K_M"
 QUERY_PREFIX = "Instruct: Given a question from an entrepreneur, retrieve relevant Russian educational passages and course descriptions.\nQuery: "
 INDEX_VERSION = "1"
-PROMPT_VERSION = "consultation-6"
+PROMPT_VERSION = "consultation-7"
 DEFAULT_STRATEGY = "hybrid_dense"
 DEFAULT_MIN_SCORE = .35
 DEFAULT_MAX_PER_MATERIAL = 2
@@ -332,14 +333,18 @@ class Retriever:
                 "rerankRequested": self.llm_rerank, "rerankError": rerank_error}
 
 
-def response_schema(sources, catalog):
+def response_schema(sources, catalog, context=None):
     source_ids = [r["chunkId"] for r in sources]
     material_ids = [r["id"] for r in catalog]
+    from feature_contract import profile_schema, schedule_schema
+    plan = (context or {}).get("currentPlan")
+    step_ids = [s["id"] for s in plan["steps"]] if plan and plan["status"] == "ACTIVE" else []
+    linked_materials = material_ids + ([m["id"] for s in plan["steps"] for m in s["materials"]] if plan else [])
     return {"type": "object", "additionalProperties": False,
             "required": ["schemaVersion", "status", "answer", "sourceChunkIds", "recommendations", "profilePatch", "planProposal", "reminderProposal"],
             "properties": {
                 "schemaVersion": {"type": "string", "const": rag.SCHEMA},
-                "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND"]},
+                "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND", "ACTION_PROPOSAL"]},
                 "answer": {"type": "string", "minLength": 1, "maxLength": 2500},
                 "sourceChunkIds": {"type": "array", "uniqueItems": True, "maxItems": len(source_ids),
                                    "items": {"type": "string", **({"enum": source_ids} if source_ids else {})}},
@@ -348,14 +353,26 @@ def response_schema(sources, catalog):
                                               "required": ["materialId", "reason"], "properties": {
                                                   "materialId": {"type": "string", **({"enum": material_ids} if material_ids else {})},
                                                   "reason": {"type": "string", "minLength": 1, "maxLength": 300}}}},
-                "profilePatch": {"type": "object", "additionalProperties": False, "properties": {}},
-                "planProposal": {"type": "null"}, "reminderProposal": {"type": "null"}}}
+                "profilePatch": profile_schema(),
+                "planProposal": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
+                    "required": ["goal", "steps"], "properties": {"goal": {"type": "string", "minLength": 1, "maxLength": 250},
+                    "steps": {"type": "array", "minItems": 3, "maxItems": 5, "items": {
+                        "type": "object", "additionalProperties": False, "required": ["title", "description", "materialIds"],
+                        "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 160},
+                                       "description": {"type": "string", "minLength": 1, "maxLength": 600},
+                                       "materialIds": {"type": "array", "minItems": 1, "maxItems": 2,
+                                                       "items": {"type": "string", **({"enum": material_ids} if material_ids else {})}}}}}}}]},
+                "reminderProposal": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
+                    "required": ["title", "schedule", "materialId", "planStepId"], "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 160}, "schedule": schedule_schema(),
+                        "materialId": {"enum": [None, *dict.fromkeys(linked_materials)]},
+                        "planStepId": {"enum": [None, *step_ids]}}}]}}}
 
 
-def validate_response(result, sources, catalog):
+def validate_response(result, sources, catalog, context=None, now=None, expected_profile_patch=None):
     if not isinstance(result, dict) or set(result) != set(response_schema(sources, catalog)["required"]):
         raise RagError("Ответ модели: неверный набор полей")
-    if result["schemaVersion"] != rag.SCHEMA or result["status"] not in {"ANSWER", "CLARIFY", "NOT_FOUND"}:
+    if result["schemaVersion"] != rag.SCHEMA or result["status"] not in {"ANSWER", "CLARIFY", "NOT_FOUND", "ACTION_PROPOSAL"}:
         raise RagError("Ответ модели: версия или статус")
     if not isinstance(result["answer"], str) or not 1 <= len(result["answer"].strip()) <= 2500:
         raise RagError("Ответ модели: длина answer")
@@ -366,7 +383,7 @@ def validate_response(result, sources, catalog):
             or len(citations) != len(set(citations))
             or not set(citations) <= {r["chunkId"] for r in sources}):
         raise RagError("Ответ модели: неизвестные/повторные источники")
-    if (result["status"] == "ANSWER") != bool(citations):
+    if result["status"] == "ANSWER" and not citations or result["status"] in {"CLARIFY", "NOT_FOUND"} and citations:
         raise RagError("Ответ модели: статус не согласован с источниками")
     recs = result["recommendations"]
     if not isinstance(recs, list) or len(recs) > 3:
@@ -382,8 +399,15 @@ def validate_response(result, sources, catalog):
         seen.add(rec["materialId"])
     if result["status"] == "CLARIFY" and recs:
         raise RagError("Уточнение не должно содержать рекомендации")
-    if result["profilePatch"] != {} or result["planProposal"] is not None or result["reminderProposal"] is not None:
-        raise RagError("Эта версия формирует только консультации, без изменений профиля и действий")
+    if result["status"] == "CLARIFY" and result["answer"].count("?") != 1:
+        raise RagError("Уточнение должно содержать один конкретный вопрос")
+    if result["profilePatch"] and result["profilePatch"] != expected_profile_patch:
+        raise RagError("Изменения профиля не подтверждены явными словами пользователя")
+    from feature_contract import validate_proposals, utc_now
+    try:
+        validate_proposals(result, catalog, context or {}, utc_now(now))
+    except (ValueError, TypeError, KeyError) as error:
+        raise RagError(str(error)) from error
     return result
 
 
@@ -415,8 +439,12 @@ def load_context(path=None):
         if (not isinstance(row, dict) or set(row) != {"role", "text"} or row["role"] not in {"USER", "ASSISTANT"}
                 or not isinstance(row["text"], str) or len(row["text"]) > 4000):
             raise RagError("Некорректное сообщение истории")
-    if context["currentPlan"] is not None:
-        raise RagError("Текущий план пока не поддерживается локальной версией консультаций")
+    from feature_contract import validate_current_plan, validate_profile
+    try:
+        validate_profile(profile)
+        validate_current_plan(context["currentPlan"])
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
+        raise RagError(str(error)) from error
     return context
 
 
@@ -441,6 +469,10 @@ def make_input(question, retrieved, context, now, answer_mode="generative", toke
     payload = {"schemaVersion": rag.SCHEMA, "now": now, "message": question,
                **context, "history": context["history"][-MAX_HISTORY_MESSAGES:],
                "sources": sources, "catalog": catalog}
+    if context.get("currentPlan"):
+        plan = context["currentPlan"]
+        payload["currentPlan"] = {"goal": plan["goal"], "status": plan["status"],
+                                  "steps": [{k: s[k] for k in ["position", "title", "description", "status"]} for s in plan["steps"]]}
     # Байты UTF-8 — консервативная верхняя оценка токенов содержимого.
     # Оставляем резерв на chat template/выход. Не полагаемся на тихое усечение API.
     budget = CONTEXT_SIZE - OUTPUT_TOKENS - 1024
@@ -479,6 +511,10 @@ def model_request(payload, answer_mode="generative"):
     for key in ("profile", "history"):
         if payload[key]:
             data[key] = payload[key]
+    if payload.get("currentPlan"):
+        plan = payload["currentPlan"]
+        data["currentPlan"] = {"goal": plan["goal"], "status": plan["status"],
+                               "steps": [{k: step[k] for k in ["position", "title", "description", "status"]} for step in plan["steps"]]}
     # Стабильный контекст идёт до вопроса; секунды now больше не ломают его кэш.
     encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     from answer_policy import EVIDENCE_PROMPT, SELECTION_PROMPT, evidence_passages
@@ -553,11 +589,11 @@ def expand_model_response(value, payload, source_ids, material_ids, answer_limit
     return validate_response(result, payload["sources"], payload["catalog"])
 
 
-def ask(retriever, question, client, chat_model=CHAT_MODEL, context=None, min_score=DEFAULT_MIN_SCORE, timeout=60, answer_mode=DEFAULT_ANSWER_MODE, compression="none"):
+def ask(retriever, question, client, chat_model=CHAT_MODEL, context=None, min_score=DEFAULT_MIN_SCORE, timeout=60, answer_mode=DEFAULT_ANSWER_MODE, compression="none", now=None, operation="consultation"):
     previous = getattr(client, "deadline", None)
     client.deadline = time.monotonic() + timeout
     try:
-        return _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression)
+        return _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression, now, operation)
     finally:
         client.deadline = previous
 
@@ -573,31 +609,123 @@ def policy_result(policy, started, answer_mode):
         "sourcesSent": 0, "catalogSent": 0, "promptVersion": PROMPT_VERSION}}
 
 
-def _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression):
+def action_result(action, patch, context, now, started, route, retriever=None, payload=None, attempts=0, profile_attempts=0, retrieved=None):
+    response = {"schemaVersion": rag.SCHEMA, "status": action["status"], "answer": action["answer"],
+                "sourceChunkIds": action.get("sourceChunkIds", []), "recommendations": action.get("recommendations", []),
+                "profilePatch": patch, "planProposal": action.get("planProposal"), "reminderProposal": action.get("reminderProposal")}
+    sources = (payload or {}).get("sources", [])
+    catalog = (payload or {}).get("catalog", [])
+    if response["reminderProposal"] and retriever is not None:
+        mid = response["reminderProposal"]["materialId"]
+        if mid in retriever.materials:
+            catalog = [{"id": mid}]
+    validate_response(response, sources, catalog, context, now, patch)
+    references, cards = [], []
+    if retriever is not None:
+        for cid in response["sourceChunkIds"]:
+            chunk = retriever.chunks[cid]; material = retriever.materials[chunk["materialId"]]
+            references.append({"chunkId": cid, "materialId": chunk["materialId"], "title": material["title"], "url": material["url"]})
+        cards = [{**retriever.materials[r["materialId"]], "recommendationReason": r["reason"]} for r in response["recommendations"]]
+    return {"response": response, "references": references, "recommendationCards": cards, "diagnostics": {
+        "route": route, "promptVersion": PROMPT_VERSION, "featureVersion": "actions-1", "now": now,
+        "elapsedSeconds": round(time.monotonic()-started, 3), "attempts": attempts,
+        "profileExtractionAttempts": profile_attempts,
+        "sources": [{k: s[k] for k in ["chunkId", "materialId", "score"]} for s in (retrieved or {}).get("sources", [])],
+        "sourceChunkIdsSent": [s["chunkId"] for s in sources], "sourcesSent": len(sources), "catalogSent": len(catalog)}}
+
+
+def _ask(retriever, question, client, chat_model, context, min_score, timeout, answer_mode, compression, now, operation):
     started = time.monotonic()
     if not isinstance(question, str) or not 1 <= len(question.strip()) <= 4000:
         raise RagError("Вопрос должен содержать от 1 до 4000 символов")
     if answer_mode not in {"generative", "evidence", "extracts"}:
         raise RagError("Неизвестный режим ответа")
+    if operation not in {"consultation", "generate_plan"}:
+        raise RagError("Неизвестная операция")
     context = load_context(context)
+    from feature_contract import utc_now
+    try:
+        clock = utc_now(now)
+    except ValueError as error:
+        raise RagError(str(error)) from error
+    now = clock.isoformat().replace("+00:00", "Z")
     from answer_policy import route_question, expand_evidence, expand_selection
     routed = route_question(question, context)
     if routed:
         return policy_result(routed, started, answer_mode)
+    from reminder_proposals import requested as reminder_requested, pending_message, draft_reminder
+    from plan_proposals import requested as plan_requested, goal_from_message, build_plan
+    from profile_updates import extraction_needed, extract_profile_patch
+    reminder_turn = reminder_requested(question) or pending_message(question, context) is not None
+    plan_turn = plan_requested(question, context, operation)
+    patch, profile_attempts, repairs_left = {}, 0, 1
+    if extraction_needed(question, context, reminder_turn):
+        client.model(chat_model)
+        try:
+            patch, profile_attempts, repairs_left = extract_profile_patch(question, context, client, chat_model, repairs_left)
+        except ValueError as error:
+            raise RagError(str(error)) from error
+    import copy
+    effective = copy.deepcopy(context)
+    effective["profile"].update(patch)
+    def finish(action, route, **kwargs):
+        return action_result(action, patch, context, now, started, route, retriever, profile_attempts=profile_attempts, **kwargs)
+    if reminder_turn and plan_turn:
+        return finish({"status": "CLARIFY", "answer": "Что подготовить сначала: план действий или предложение напоминания?"}, "action_clarify")
+    if reminder_turn:
+        action = draft_reminder(question, effective, clock, getattr(retriever, "materials", {}))
+        return finish(action, "reminder_proposal" if action["status"] == "ACTION_PROPOSAL" else "reminder_clarify")
+    explicit_profile = bool(re.search(r"профил|моя\s+сфера|моя\s+отрасл", question, re.I))
+    profile_only = explicit_profile or bool(patch and set(patch) != {"currentTask"} and not re.search(r"\?|\b(как|почему|зачем|сколько|что|какой|посоветуй|объясни|расскажи)\b", question, re.I))
+    if profile_only and not plan_turn:
+        answer = "Предлагаю изменения профиля для проверки в приложении. Какую задачу бизнеса вы хотите разобрать дальше?" if patch else "Какие поля профиля вы хотите изменить и какие значения указать?"
+        return finish({"status": "CLARIFY", "answer": answer}, "profile_patch" if patch else "profile_clarify")
+    if plan_turn:
+        goal = goal_from_message(question, effective, operation)
+        if goal is None:
+            return finish({"status": "CLARIFY", "answer": "Какую конкретную цель до 250 символов должен решать план?"}, "plan_clarify")
+        client.model(chat_model)
+        retrieved = retriever.retrieve(goal, min_score=min_score)
+        from token_budget import local_token_counter
+        payload = make_input(question, retrieved, effective, now, "extracts", local_token_counter(chat_model))
+        payload["sources"] = payload["sources"][:2]
+        for source in payload["sources"]:
+            mid = source["materialId"]
+            if mid not in {card["id"] for card in payload["catalog"]}:
+                material = retriever.materials[mid]
+                payload["catalog"].append({"id": mid, "title": material["title"], "kind": material["sourceType"],
+                    "description": (material["description"] or "")[:200] or None, "isPaid": material["isPaid"],
+                    "duration": material["duration"], "url": material["url"]})
+        try:
+            action, attempts, repairs_left = build_plan(payload, goal, client, chat_model, repairs_left)
+        except ValueError as error:
+            raise RagError(str(error)) from error
+        return finish(action, "plan_proposal" if action["planProposal"] else "plan_clarify" if action["status"] == "CLARIFY" else "plan_not_found",
+                      payload=payload, attempts=attempts, retrieved=retrieved)
+    active_plan = effective.get("currentPlan")
+    if (active_plan and active_plan["status"] == "ACTIVE" and all(s["status"] == "DONE" for s in active_plan["steps"])
+            and len(rag.tokens(question)) < 9 and re.search(r"дальше|следующ|продолж", question, re.I)):
+        return finish({"status": "CLARIFY", "answer": "В текущем плане все шаги отмечены выполненными. Какую новую цель бизнеса вы хотите выбрать?"}, "plan_completed")
     from calculation import parse_breakeven, formula_source, calculation_result
     calculation = parse_breakeven(question)
     if calculation and calculation["status"] == "CLARIFY":
-        return policy_result(calculation, started, answer_mode)
+        return finish(calculation, calculation["route"])
     model = client.model(chat_model)
     # У короткого продолжения диалога используем предыдущий вопрос как контекст поиска.
     query = question
+    current_plan = effective.get("currentPlan")
+    if current_plan and current_plan["status"] != "ACTIVE":
+        current_plan = None
     if len(rag.tokens(question)) < 7:
         prior = [h["text"] for h in context["history"] if h["role"] == "USER"]
         if prior:
             query = prior[-1][:600] + "\n" + question
+        if current_plan and re.search(r"дальше|следующ|продолж|шаг", question, re.I):
+            step = next((s for s in sorted(current_plan["steps"], key=lambda s: s["position"]) if s["status"] == "TODO"), None)
+            query = current_plan["goal"] + "\n" + (step["title"] if step else "") + "\n" + question
     retrieved = retriever.retrieve(query, min_score=min_score)
-    if len(rag.tokens(question)) < 7 and not context["history"] and context["profile"].get("currentTask"):
-        query = context["profile"]["currentTask"][:600] + "\n" + question
+    if len(rag.tokens(question)) < 7 and not context["history"] and effective["profile"].get("currentTask") and not current_plan:
+        query = effective["profile"]["currentTask"][:600] + "\n" + question
         retrieved = retriever.retrieve(query, min_score=min_score)
     if calculation:
         source = formula_source(retrieved["sources"])
@@ -605,19 +733,20 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout, a
             source = formula_source(retriever.retrieve("Точка безубыточности постоянные расходы маржа единицы товара", limit=8, min_score=min_score)["sources"])
         if source is not None:
             result = calculation_result(calculation, source, retriever, round(time.monotonic()-started, 3))
-            validate_response(result["response"], [source[0]], [])
+            result["response"]["profilePatch"] = patch
+            validate_response(result["response"], [source[0]], [], context, now, patch)
             return result
-        return policy_result({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER, "route": "calculation_no_formula"}, started, answer_mode)
+        return finish({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER}, "calculation_no_formula")
     if not retrieved["sources"]:
-        return policy_result({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER, "route": "no_context"}, started, answer_mode)
+        return finish({"status": "NOT_FOUND", "answer": NOT_FOUND_ANSWER}, "no_context")
     from token_budget import local_token_counter
     token_counter = local_token_counter(chat_model) if answer_mode in {"evidence", "extracts"} else None
-    payload = make_input(question, retrieved, context, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), answer_mode, token_counter, compression)
+    payload = make_input(question, retrieved, effective, now, answer_mode, token_counter, compression)
     messages, schema, source_ids, material_ids = model_request(payload, answer_mode)
     input_bytes = sum(len(m["content"].encode("utf-8")) for m in messages)
     response = None
     selected_evidence_ids = []
-    for attempt in range(2):
+    for attempt in range(1+repairs_left):
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
             raise RagError("Превышен общий бюджет консультации; это технический сбой, не NOT_FOUND")
@@ -640,7 +769,7 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout, a
             response = expand_model_response(value, payload, source_ids, material_ids, 900 if answer_mode == "extracts" else MODEL_ANSWER_CHARS)
             break
         except (ValueError, KeyError, TypeError, RagError):
-            if attempt:
+            if attempt >= repairs_left:
                 raise RagError("Модель дважды вернула некорректный результат; технический сбой")
             # Повтор только на формат. Не добавляем произвольный невалидный ответ модели в prompt.
             messages.append({"role": "user", "content": "Результат не прошёл проверку. Верни JSON по схеме с допустимыми ID. Если источники отвечают на вопрос, нужен ANSWER. Не повторяй вопрос пользователя как уточнение. Соблюдай длины полей."})
@@ -649,6 +778,8 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout, a
     # Валидируем исходный JSON выше; свободный текст отказа пользователю не показываем.
     if response["status"] == "NOT_FOUND":
         response = {**response, "answer": NOT_FOUND_ANSWER, "recommendations": []}
+    response["profilePatch"] = patch
+    validate_response(response, payload["sources"], payload["catalog"], context, now, patch)
     material_lookup = retriever.materials
     references = [{"chunkId": cid, "materialId": retriever.chunks[cid]["materialId"]} for cid in response["sourceChunkIds"]]
     for ref in references:
@@ -658,6 +789,7 @@ def _ask(retriever, question, client, chat_model, context, min_score, timeout, a
             "diagnostics": {"elapsedSeconds": round(time.monotonic() - started, 3),
                             "embeddingModel": retriever.config["embeddingModel"], "chatModel": model,
                             "promptVersion": PROMPT_VERSION, "attempts": attempt + 1,
+                            "profileExtractionAttempts": profile_attempts,
                             "modelInputBytes": input_bytes, "modelResponseFormat": "extract-selection-1" if answer_mode == "extracts" else "compact-1",
                             "minScore": min_score, "thresholdCalibrated": False,
                             "answerMode": answer_mode, "route": "consultation",

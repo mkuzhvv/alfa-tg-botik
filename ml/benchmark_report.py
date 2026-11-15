@@ -9,7 +9,7 @@ from rag_eval import summarize
 
 
 def audit_extracts(rows, chunks, materials):
-    answers = verified = 0
+    answers = verified = other_modes = 0
     problems = []
     for row in rows:
         result = row.get("result", {})
@@ -18,6 +18,9 @@ def audit_extracts(rows, chunks, materials):
             continue
         answers += 1
         diag = result["diagnostics"]
+        if diag.get("answerMode") != "extracts":
+            other_modes += 1
+            continue
         sources = []
         for span in diag["sourceSpansSent"]:
             chunk = chunks[span["chunkId"]]
@@ -35,7 +38,7 @@ def audit_extracts(rows, chunks, materials):
             verified += 1
         except (ValueError, KeyError) as error:
             problems.append({"id": row["id"], "error": str(error)})
-    return {"answers": answers, "verifiedExactExtracts": verified, "problems": problems,
+    return {"answers": answers, "verifiedExactExtracts": verified, "otherAnswerModes": other_modes, "problems": problems,
             "note": "Exact textual support; this is not a semantic faithfulness or correctness score."}
 
 
