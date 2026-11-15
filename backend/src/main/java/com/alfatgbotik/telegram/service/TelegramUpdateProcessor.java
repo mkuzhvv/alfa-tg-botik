@@ -5,6 +5,7 @@ import com.alfatgbotik.telegram.TelegramUpdateHandler;
 import com.alfatgbotik.telegram.model.StoredTelegramUpdate;
 import com.alfatgbotik.telegram.model.TelegramDeliveryResult;
 import com.alfatgbotik.telegram.model.TelegramUpdateStatus;
+import com.alfatgbotik.telegram.model.TelegramReply;
 import com.alfatgbotik.telegram.persistence.TelegramUpdateRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,14 +40,23 @@ public class TelegramUpdateProcessor {
     }
 
     public void process(long botId, Update update) {
+        boolean consultation = handler.isConsultation(update);
         StoredTelegramUpdate stored = transactions.execute(transaction -> {
             Instant now = clock.instant();
             UUID id = UUID.randomUUID();
-            if (updates.insertIfAbsent(id, botId, update.getUpdateId(), now)) {
-                updates.saveReply(id, handler.prepare(update), clock.instant());
+            if (updates.insertIfAbsent(id, botId, update.getUpdateId(), now) && !consultation) {
+                updates.saveReply(id, handler.prepare(update, id), clock.instant());
             }
             return updates.find(botId, update.getUpdateId());
         });
+        if (consultation && stored.status() == TelegramUpdateStatus.PROCESSING) {
+            TelegramReply reply = handler.prepare(update, stored.id());
+            UUID id = stored.id();
+            stored = transactions.execute(transaction -> {
+                updates.saveReply(id, reply, clock.instant());
+                return updates.find(botId, update.getUpdateId());
+            });
+        }
         deliver(stored);
     }
 
@@ -58,6 +68,7 @@ public class TelegramUpdateProcessor {
     }
 
     public void recoverAfterRestart(long botId) {
+        handler.recoverAfterRestart();
         recoverInterrupted(botId, clock.instant());
     }
 

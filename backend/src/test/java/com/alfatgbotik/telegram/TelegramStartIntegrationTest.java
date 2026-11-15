@@ -26,6 +26,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.time.Clock;
+import java.util.UUID;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.concurrent.ThreadLocalRandom;
@@ -68,7 +69,7 @@ class TelegramStartIntegrationTest {
     @BeforeEach
     void configureProcessor() {
         when(clock.instant()).thenReturn(now);
-        handler = spy(new TelegramUpdateHandler(users));
+        handler = spy(new TelegramUpdateHandler(users, mock(com.alfatgbotik.assistant.service.ConversationService.class)));
         processor = newProcessor();
     }
 
@@ -90,7 +91,7 @@ class TelegramStartIntegrationTest {
         processor.process(botId, update);
         newProcessor().process(botId, update);
 
-        verify(handler).prepare(update);
+        verify(handler).prepare(org.mockito.ArgumentMatchers.eq(update), any(UUID.class));
         verify(client).execute(any(SendMessage.class));
         assertThat(updates.find(botId, 10).status()).isEqualTo(TelegramUpdateStatus.DONE);
         var user = userRepository.findByTelegramUserId(telegramUserId).orElseThrow();
@@ -106,7 +107,7 @@ class TelegramStartIntegrationTest {
         doAnswer(invocation -> {
             invocation.callRealMethod();
             throw new IllegalStateException("simulated preparation failure");
-        }).when(handler).prepare(any(Update.class));
+        }).when(handler).prepare(any(Update.class), any(UUID.class));
 
         assertThatThrownBy(() -> processor.process(botId, messageUpdate(10, "/start")))
                 .isInstanceOf(IllegalStateException.class);
@@ -140,7 +141,7 @@ class TelegramStartIntegrationTest {
         assertThat(updates.find(botId, 10).status()).isEqualTo(TelegramUpdateStatus.DONE);
         assertThat(updates.find(botId, 10).attempts()).isEqualTo(2);
         verify(client, times(2)).execute(any(SendMessage.class));
-        verify(handler).prepare(update);
+        verify(handler).prepare(org.mockito.ArgumentMatchers.eq(update), any(UUID.class));
     }
 
     @Test
@@ -182,7 +183,7 @@ class TelegramStartIntegrationTest {
 
         assertThat(updates.find(botId, 10).status()).isEqualTo(TelegramUpdateStatus.DELIVERY_UNKNOWN);
         verify(client).execute(any(SendMessage.class));
-        verify(handler).prepare(update);
+        verify(handler).prepare(org.mockito.ArgumentMatchers.eq(update), any(UUID.class));
     }
 
     @Test
@@ -199,7 +200,7 @@ class TelegramStartIntegrationTest {
 
         assertThat(updates.find(botId, 10).status()).isEqualTo(TelegramUpdateStatus.DELIVERY_UNKNOWN);
         verify(client).execute(any(SendMessage.class));
-        verify(handler).prepare(update);
+        verify(handler).prepare(org.mockito.ArgumentMatchers.eq(update), any(UUID.class));
     }
 
     @Test
@@ -213,7 +214,7 @@ class TelegramStartIntegrationTest {
         assertThat(updates.find(botId, 10).status()).isEqualTo(TelegramUpdateStatus.IGNORED);
         assertThat(userRepository.findByTelegramUserId(telegramUserId)).isEmpty();
         verifyNoInteractions(client);
-        verify(handler).prepare(update);
+        verify(handler).prepare(org.mockito.ArgumentMatchers.eq(update), any(UUID.class));
     }
 
     private TelegramUpdateProcessor newProcessor() {

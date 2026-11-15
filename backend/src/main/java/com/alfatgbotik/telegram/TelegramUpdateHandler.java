@@ -1,6 +1,7 @@
 package com.alfatgbotik.telegram;
 
 import com.alfatgbotik.identity.service.UserService;
+import com.alfatgbotik.assistant.service.ConversationService;
 import com.alfatgbotik.telegram.model.TelegramReply;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -10,13 +11,15 @@ import org.telegram.telegrambots.meta.api.objects.message.Message;
 
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.UUID;
 
 public class TelegramUpdateHandler {
 
     private static final String START_MESSAGE = """
             Привет! Добро пожаловать в помощник «Альфа-Курса».
 
-            Консультации и рекомендации пока готовятся. Скоро здесь можно будет задать вопрос о своём бизнесе.
+            Задай вопрос о своём бизнесе — помогу разобраться по материалам «Альфа-Курса» и подберу полезные ссылки.
+            Подготовка ответа может занять до минуты.
             """;
     private static final String HELP_MESSAGE = """
             Доступные команды:
@@ -24,12 +27,9 @@ public class TelegramUpdateHandler {
             /help — показать эту справку.
 
             Под приветствием есть кнопка «Помощь» — она открывает ту же справку.
-            Консультации по материалам «Альфа-Курса» пока не подключены.
-            """;
-    private static final String CONSULTATIONS_PENDING_MESSAGE = """
-            Консультации и рекомендации по материалам «Альфа-Курса» пока не подключены.
-
-            Доступные команды: /start и /help.
+            Для консультации просто отправь вопрос текстом, до 4000 символов.
+            Я учитываю последние сообщения диалога. Подготовка ответа может занять до минуты.
+            Сохранение планов и управление напоминаниями из переписки ещё не подключены.
             """;
     private static final String UNKNOWN_COMMAND_MESSAGE =
             "Неизвестная команда. Доступные команды: /start и /help.";
@@ -37,22 +37,37 @@ public class TelegramUpdateHandler {
             "Этот тип сообщения пока не поддерживается. Пришли текст или воспользуйся /help.";
 
     private final UserService users;
+    private final ConversationService conversations;
 
-    public TelegramUpdateHandler(UserService users) {
+    public TelegramUpdateHandler(UserService users, ConversationService conversations) {
         this.users = users;
+        this.conversations = conversations;
     }
 
-    public TelegramReply prepare(Update update) {
+    public TelegramReply prepare(Update update, UUID requestId) {
         if (update.hasCallbackQuery()) {
             return prepareCallback(update.getCallbackQuery());
         }
         if (update.hasMessage()) {
-            return prepareMessage(update.getMessage());
+            return prepareMessage(update.getMessage(), requestId);
         }
         return TelegramReply.none();
     }
 
-    private TelegramReply prepareMessage(Message message) {
+    public boolean isConsultation(Update update) {
+        if (!update.hasMessage()) {
+            return false;
+        }
+        Message message = update.getMessage();
+        return isPrivateChat(message.getChat()) && isHuman(message.getFrom()) && message.hasText()
+                && !message.getText().strip().startsWith("/");
+    }
+
+    public void recoverAfterRestart() {
+        conversations.recoverInterrupted();
+    }
+
+    private TelegramReply prepareMessage(Message message, UUID requestId) {
         User sender = message.getFrom();
         if (!isPrivateChat(message.getChat()) || !isHuman(sender)) {
             return TelegramReply.none();
@@ -65,20 +80,32 @@ public class TelegramUpdateHandler {
         return switch (command) {
             case "/start" -> prepareStart(message);
             case "/help" -> TelegramReply.message(message.getChatId(), HELP_MESSAGE, false);
-            default -> TelegramReply.message(message.getChatId(), text.startsWith("/")
-                    ? UNKNOWN_COMMAND_MESSAGE : CONSULTATIONS_PENDING_MESSAGE, false);
+            default -> text.startsWith("/") ? TelegramReply.message(message.getChatId(), UNKNOWN_COMMAND_MESSAGE, false)
+                    : prepareConsultation(message, requestId);
         };
     }
 
     private TelegramReply prepareStart(Message message) {
         User sender = message.getFrom();
+        users.confirmTelegramChat(sender.getId(), message.getChatId(), displayName(sender));
+        return TelegramReply.message(message.getChatId(), START_MESSAGE, true);
+    }
+
+    private TelegramReply prepareConsultation(Message message, UUID requestId) {
+        String text = message.getText().strip();
+        if (text.isBlank() || text.codePointCount(0, text.length()) > 4000) {
+            return TelegramReply.message(message.getChatId(), "Напиши непустой вопрос длиной до 4000 символов.", false);
+        }
+        var user = users.getOrCreate(message.getFrom().getId(), displayName(message.getFrom()));
+        return TelegramReply.message(message.getChatId(), conversations.consult(user.id(), requestId, text), false);
+    }
+
+    private String displayName(User sender) {
         String displayName = Stream.of(sender.getFirstName(), sender.getLastName())
                 .filter(name -> name != null && !name.isBlank())
                 .map(String::strip)
                 .collect(Collectors.joining(" "));
-        users.confirmTelegramChat(sender.getId(), message.getChatId(),
-                displayName.isEmpty() ? null : displayName);
-        return TelegramReply.message(message.getChatId(), START_MESSAGE, true);
+        return displayName.isEmpty() ? null : displayName;
     }
 
     private TelegramReply prepareCallback(CallbackQuery callback) {

@@ -1,6 +1,7 @@
 package com.alfatgbotik.telegram;
 
 import com.alfatgbotik.identity.service.UserService;
+import com.alfatgbotik.assistant.service.ConversationService;
 import com.alfatgbotik.telegram.persistence.TelegramUpdateRepository;
 import com.alfatgbotik.telegram.service.TelegramUpdateProcessor;
 import jakarta.annotation.PreDestroy;
@@ -43,8 +44,8 @@ public class TelegramConfiguration {
     }
 
     @Bean
-    public TelegramUpdateHandler telegramUpdateHandler(UserService users) {
-        return new TelegramUpdateHandler(users);
+    public TelegramUpdateHandler telegramUpdateHandler(UserService users, ConversationService conversations) {
+        return new TelegramUpdateHandler(users, conversations);
     }
 
     @Bean

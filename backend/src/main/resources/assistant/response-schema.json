@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "answer", "sourceChunkIds", "recommendations", "profilePatch", "planProposal", "reminderProposal"],
+  "properties": {
+    "schemaVersion": {"type": "string", "const": "0.1.0"},
+    "status": {"type": "string", "enum": ["ANSWER", "CLARIFY", "NOT_FOUND"]},
+    "answer": {"type": "string", "minLength": 1, "maxLength": 2500},
+    "sourceChunkIds": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}},
+    "recommendations": {
+      "type": "array", "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["materialId", "reason"],
+        "properties": {
+          "materialId": {"type": "string", "format": "uuid"},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 300}
+        }
+      }
+    },
+    "profilePatch": {"type": "object", "additionalProperties": false},
+    "planProposal": {"type": "null"},
+    "reminderProposal": {"type": "null"}
+  }
+}

@@ -19,6 +19,8 @@ class TelegramConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withBean(UserService.class, () -> mock(UserService.class))
+            .withBean(com.alfatgbotik.assistant.service.ConversationService.class,
+                    () -> mock(com.alfatgbotik.assistant.service.ConversationService.class))
             .withBean(TelegramUpdateRepository.class, () -> mock(TelegramUpdateRepository.class))
             .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
             .withUserConfiguration(TelegramConfiguration.class);

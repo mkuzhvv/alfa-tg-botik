@@ -1,6 +1,8 @@
 package com.alfatgbotik.telegram;
 
 import com.alfatgbotik.identity.service.UserService;
+import com.alfatgbotik.assistant.service.ConversationService;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -22,7 +24,8 @@ import static org.mockito.Mockito.when;
 class TelegramUpdateHandlerTest {
 
     private final UserService users = mock(UserService.class);
-    private final TelegramUpdateHandler handler = new TelegramUpdateHandler(users);
+    private final ConversationService conversations = mock(ConversationService.class);
+    private final TelegramUpdateHandler handler = new TelegramUpdateHandler(users, conversations);
 
     @Test
     void registersPrivateChatAndPreparesWelcome() {
@@ -30,7 +33,7 @@ class TelegramUpdateHandlerTest {
         update.getMessage().getFrom().setFirstName("Иван");
         update.getMessage().getFrom().setLastName("Петров");
 
-        var reply = handler.prepare(update);
+        var reply = prepare(update);
 
         verify(users).confirmTelegramChat(42, 99, "Иван Петров");
         assertThat(reply.chatId()).isEqualTo(99);
@@ -40,14 +43,14 @@ class TelegramUpdateHandlerTest {
 
     @Test
     void ignoresEventsOutsidePrivateHumanChat() {
-        assertThat(handler.prepare(new Update()).isEmpty()).isTrue();
-        assertThat(handler.prepare(messageUpdate(42, -99, "group", "/start")).isEmpty()).isTrue();
+        assertThat(prepare(new Update()).isEmpty()).isTrue();
+        assertThat(prepare(messageUpdate(42, -99, "group", "/start")).isEmpty()).isTrue();
         Update botSender = messageUpdate(42, 99, "private", "/start");
         botSender.getMessage().getFrom().setIsBot(true);
-        assertThat(handler.prepare(botSender).isEmpty()).isTrue();
+        assertThat(prepare(botSender).isEmpty()).isTrue();
         Update withoutSender = messageUpdate(42, 99, "private", "/help");
         withoutSender.getMessage().setFrom(null);
-        assertThat(handler.prepare(withoutSender).isEmpty()).isTrue();
+        assertThat(prepare(withoutSender).isEmpty()).isTrue();
 
         verifyNoInteractions(users);
     }
@@ -57,18 +60,17 @@ class TelegramUpdateHandlerTest {
         when(users.confirmTelegramChat(42, 99, "Test"))
                 .thenThrow(new DataAccessResourceFailureException("database unavailable"));
 
-        assertThatThrownBy(() -> handler.prepare(messageUpdate(42, 99, "private", "/start")))
+        assertThatThrownBy(() -> prepare(messageUpdate(42, 99, "private", "/start")))
                 .isInstanceOf(DataAccessResourceFailureException.class);
     }
 
     @ParameterizedTest
     @CsvSource({
             "/help, Доступные команды",
-            "/unknown, Неизвестная команда",
-            "Как увеличить продажи?, пока не подключены"
+            "/unknown, Неизвестная команда"
     })
     void routesTextWithoutChangingUserProfile(String text, String expectedReply) {
-        var reply = handler.prepare(messageUpdate(42, 99, "private", text));
+        var reply = prepare(messageUpdate(42, 99, "private", text));
 
         assertThat(reply.chatId()).isEqualTo(99);
         assertThat(reply.text()).contains(expectedReply);
@@ -78,7 +80,7 @@ class TelegramUpdateHandlerTest {
 
     @Test
     void explainsUnsupportedMessageType() {
-        var reply = handler.prepare(messageUpdate(42, 99, "private", null));
+        var reply = prepare(messageUpdate(42, 99, "private", null));
 
         assertThat(reply.text()).contains("тип сообщения", "/help");
         verifyNoInteractions(users);
@@ -86,7 +88,7 @@ class TelegramUpdateHandlerTest {
 
     @Test
     void preparesAcknowledgementAndHelpForButton() {
-        var reply = handler.prepare(callbackUpdate("help"));
+        var reply = prepare(callbackUpdate("help"));
 
         assertThat(reply.callbackQueryId()).isEqualTo("callback-10");
         assertThat(reply.callbackText()).isNull();
@@ -97,7 +99,7 @@ class TelegramUpdateHandlerTest {
 
     @Test
     void unknownButtonOnlyShowsNotice() {
-        var reply = handler.prepare(callbackUpdate("unknown-action"));
+        var reply = prepare(callbackUpdate("unknown-action"));
 
         assertThat(reply.callbackText()).contains("больше не поддерживается", "/help");
         assertThat(reply.chatId()).isNull();
@@ -109,7 +111,7 @@ class TelegramUpdateHandlerTest {
         Update update = callbackUpdate("help");
         update.getCallbackQuery().setMessage(null);
 
-        var reply = handler.prepare(update);
+        var reply = prepare(update);
 
         assertThat(reply.callbackText()).contains("личный чат");
         assertThat(reply.chatId()).isNull();
@@ -122,8 +124,12 @@ class TelegramUpdateHandlerTest {
         Chat chat = update.getCallbackQuery().getMessage().getChat();
         update.getCallbackQuery().setMessage(InaccessibleMessage.builder().chat(chat).messageId(1).date(0).build());
 
-        assertThat(handler.prepare(update).text()).contains("/help");
+        assertThat(prepare(update).text()).contains("/help");
         verifyNoInteractions(users);
+    }
+
+    private com.alfatgbotik.telegram.model.TelegramReply prepare(Update update) {
+        return handler.prepare(update, UUID.randomUUID());
     }
 
     private Update callbackUpdate(String data) {
