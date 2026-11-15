@@ -16,6 +16,7 @@ import {
 import { useAppStore } from '@/shared/api/appStore'
 import {
   ApiError,
+  apiError,
   type Reminder,
   type ReminderCreate,
 } from '@/shared/api/client'
@@ -96,9 +97,29 @@ function RemindersScreen() {
   const [timeZone, setTimeZone] = useState('')
   const [editing, setEditing] = useState<Reminder | null>(null)
   const [message, setMessage] = useState('')
+  const [pendingAction, setPendingAction] = useState<{
+    id: string
+    label: string
+  } | null>(null)
   const disabled = !!busy || loading
 
   const visibleReminders = reminders.filter((r) => r.status !== 'CANCELLED')
+
+  const runReminderAction = async (
+    id: string,
+    label: string,
+    action: () => Promise<void>,
+  ) => {
+    if (useAppStore.getState().busy || useAppStore.getState().loading) return
+    setPendingAction({ id, label })
+    try {
+      await action()
+    } catch (failure) {
+      useAppStore.setState({ error: apiError(failure) })
+    } finally {
+      setPendingAction(null)
+    }
+  }
 
   const openForm = (reminder: Reminder | null = null, taxTemplate = false) => {
     const zone = reminder?.schedule.timeZone || user?.profile.timeZone || ''
@@ -257,6 +278,7 @@ function RemindersScreen() {
               <article
                 key={reminder.id}
                 aria-label={reminder.title}
+                aria-busy={pendingAction?.id === reminder.id}
                 className={cn(
                   'bg-white rounded-2xl p-4 border transition-all space-y-3',
                   isPaused
@@ -287,43 +309,60 @@ function RemindersScreen() {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      disabled={disabled || terminal}
-                      onClick={() => openForm(reminder)}
-                      title="Изменить напоминание"
-                      className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-40 cursor-pointer"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      disabled={disabled || terminal}
-                      onClick={() => {
-                        void toggleReminderStatus(reminder.id).catch(
-                          () => undefined,
-                        )
-                      }}
-                      className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-alfa-dark transition-colors cursor-pointer"
-                      title={isPaused ? 'Возобновить' : 'Поставить на паузу'}
-                    >
-                      {isPaused ? (
-                        <Play className="w-4 h-4 text-emerald-600" />
-                      ) : (
-                        <Pause className="w-4 h-4" />
-                      )}
-                    </button>
-                    <button
-                      disabled={disabled || terminal}
-                      onClick={() => {
-                        void cancelReminder(reminder.id).catch(() => undefined)
-                      }}
-                      className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-alfa-red transition-colors cursor-pointer"
-                      title="Удалить напоминание"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {!terminal && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        disabled={disabled}
+                        onClick={() => openForm(reminder)}
+                        title="Изменить напоминание"
+                        aria-label="Изменить напоминание"
+                        className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-wait cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          void runReminderAction(
+                            reminder.id,
+                            isPaused ? 'Возобновляем…' : 'Ставим на паузу…',
+                            () => toggleReminderStatus(reminder.id),
+                          )
+                        }}
+                        className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-alfa-dark transition-colors disabled:opacity-40 disabled:cursor-wait cursor-pointer"
+                        title={isPaused ? 'Возобновить' : 'Поставить на паузу'}
+                        aria-label={
+                          isPaused ? 'Возобновить' : 'Поставить на паузу'
+                        }
+                      >
+                        {isPaused ? (
+                          <Play className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <Pause className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        disabled={disabled}
+                        onClick={() => {
+                          void runReminderAction(reminder.id, 'Отменяем…', () =>
+                            cancelReminder(reminder.id),
+                          )
+                        }}
+                        className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-alfa-red transition-colors disabled:opacity-40 disabled:cursor-wait cursor-pointer"
+                        title="Отменить напоминание"
+                        aria-label="Отменить напоминание"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                {pendingAction?.id === reminder.id && (
+                  <p role="status" className="text-xs text-gray-500">
+                    {pendingAction.label}
+                  </p>
+                )}
 
                 <div>
                   <h3

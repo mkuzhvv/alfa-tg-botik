@@ -252,6 +252,9 @@ test.describe.serial('Mini App with the local Java API', () => {
     request,
   }) => {
     await open(page, '/reminders')
+    const initialZone = (
+      await (await request.get('/api/v1/me', { headers: auth() })).json()
+    ).profile.timeZone
     await expect(
       page.getByText('отправь /start', { exact: false }),
     ).toBeVisible()
@@ -305,13 +308,44 @@ test.describe.serial('Mini App with the local Java API', () => {
     expect(
       (await (await request.get('/api/v1/me', { headers: auth() })).json())
         .profile.timeZone,
-    ).toBe('UTC')
+    ).toBe(initialZone)
     const card = page.getByRole('article', {
       name: 'Проверка Один раз',
       exact: true,
     })
+    let releasePause!: () => void
+    const pauseGate = new Promise<void>((resolve) => {
+      releasePause = resolve
+    })
+    await page.route('**/api/v1/reminders/*', async (route) => {
+      if (route.request().method() === 'PATCH') await pauseGate
+      await route.continue()
+    })
     await card.getByRole('button', { name: 'Поставить на паузу' }).click()
+    try {
+      await expect(card.getByRole('status')).toHaveText('Ставим на паузу…')
+      for (const button of await card.getByRole('button').all())
+        await expect(button).toBeDisabled()
+    } finally {
+      releasePause()
+    }
     await expect(card.getByText('На паузе', { exact: true })).toBeVisible()
+    await page.unroute('**/api/v1/reminders/*')
+    await page.route('**/api/v1/reminders/*', (route) =>
+      route.fulfill({
+        status: 503,
+        json: { code: 'SERVICE_UNAVAILABLE', message: 'Unavailable' },
+      }),
+    )
+    await card.getByRole('button', { name: 'Возобновить' }).click()
+    await expect(page.getByRole('alert')).toContainText(
+      'Сервис временно недоступен',
+    )
+    await expect(card.getByText('На паузе', { exact: true })).toBeVisible()
+    await expect(
+      card.getByRole('button', { name: 'Возобновить' }),
+    ).toBeEnabled()
+    await page.unroute('**/api/v1/reminders/*')
     await card.getByRole('button', { name: 'Возобновить' }).click()
     await expect(card.getByText('Активно', { exact: true })).toBeVisible()
     await card.getByRole('button', { name: 'Изменить напоминание' }).click()
@@ -325,8 +359,24 @@ test.describe.serial('Mini App with the local Java API', () => {
       name: 'Изменённое напоминание',
       exact: true,
     })
-    await edited.getByRole('button', { name: 'Удалить напоминание' }).click()
+    await edited.getByRole('button', { name: 'Отменить напоминание' }).click()
     await expect(edited).toHaveCount(0)
+    await page.route('**/api/v1/reminders?**', async (route) => {
+      const response = await route.fetch()
+      const body = await response.json()
+      body.items = body.items.map((item: { title: string }) =>
+        item.title === 'Изменённое напоминание'
+          ? { ...item, status: 'COMPLETED', completionReason: 'DELIVERED' }
+          : item,
+      )
+      await route.fulfill({ response, json: body })
+    })
+    await page
+      .getByRole('button', { name: 'Обновить данные', exact: true })
+      .click()
+    await expect(edited.getByText('Завершено', { exact: true })).toBeVisible()
+    await expect(edited.getByText('Доставлено', { exact: true })).toBeVisible()
+    await expect(edited.getByRole('button')).toHaveCount(0)
   })
 
   test('refreshes changes from the chat API, keeps layout widths and supports deep links/logout', async ({
